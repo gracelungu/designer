@@ -306,6 +306,48 @@ const press = async (k) => { await page.keyboard.press(k); await page.waitForTim
     await press('v');
   });
 
+  await check('Comments pin to the frame under them and move with it', async () => {
+    const ids = await S(() => {
+      const st = window.designer.store;
+      let f, r;
+      st.transact(() => {
+        f = st.create('frame', { x: 2000, y: 2000, w: 300, h: 200, name: 'Pin frame' });
+        r = st.create('rect', { x: 2040, y: 2040, w: 100, h: 60, name: 'Inner rect' }, f.id);
+      });
+      window.designer.comments.author = 'Grace';
+      window.designer.zoomToBox({ x: 1950, y: 1950, w: 400, h: 300 });
+      return { f: f.id, r: r.id };
+    });
+    await page.waitForTimeout(50);
+    await press('c');
+    const q = await canvasPoint(2060, 2060);
+    await page.mouse.click(q.x, q.y);
+    await page.waitForTimeout(100);
+    await page.keyboard.type('Pinned to the frame');
+    await page.keyboard.press('Enter');
+    const s = await store();
+    const c = s.comments.find((x) => x.text === 'Pinned to the frame');
+    assert(c && c.nodeId === ids.f, 'pinned to ' + (c && c.nodeId));
+    assert(c.author === 'Grace', 'author ' + c.author);
+    assert(await page.locator('.dz-thread .dz-on', { hasText: 'Pin frame' }).count() === 1, 'thread names the frame');
+    await press('Escape');
+    await press('v');
+    await S((id) => { const st = window.designer.store; st.transact(() => st.moveBy(id, 100, 50)); }, ids.f);
+    const a = await S((cid) => { const e = window.designer; return e.comments.anchor(e.store.doc.comments.find((x) => x.id === cid)); }, c.id);
+    assert(Math.abs(a.x - 2160) < 1 && Math.abs(a.y - 2110) < 1, 'anchor ' + JSON.stringify(a));
+  });
+
+  await check('Opening a comment from a list shows its thread', async () => {
+    await S(() => window.designer.zoomToBox({ x: 0, y: 0, w: 400, h: 300 }));
+    const id = await S(() => { const e = window.designer; const c = e.store.doc.comments.find((x) => x.text === 'Pinned to the frame'); e.comments.open(c.id); return c.id; });
+    await page.waitForTimeout(50);
+    assert(await page.locator(`.dz-pin.on[data-comment="${id}"]`).count() === 1, 'pin open');
+    const pin = await page.locator(`.dz-pin.on[data-comment="${id}"]`).boundingBox();
+    const r = await S(() => { const b = window.designer.rect(); return { l: b.left, t: b.top, w: b.width, h: b.height }; });
+    assert(pin.x > r.l && pin.x < r.l + r.w && pin.y > r.t && pin.y < r.t + r.h, 'pin in view');
+    await S(() => { const e = window.designer; e.comments.close(); e.comments.showAlways = false; e.comments.render(); });
+  });
+
   await check('Hand tool and Space pan; zoom shortcuts', async () => {
     const v0 = await S(() => ({ ...window.designer.store.view }));
     await press('h');

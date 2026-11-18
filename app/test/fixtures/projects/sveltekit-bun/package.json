@@ -1,0 +1,1 @@
+{ "name": "sveltekit-bun", "scripts": { "dev": "vite dev", "build": "vite build" }, "devDependencies": { "@sveltejs/kit": "2.0.0", "svelte": "5.0.0", "vite": "6.0.0" } }

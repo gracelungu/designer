@@ -108,7 +108,17 @@ export class ClaudeSession {
     readonly cwd: string,
     private readonly claudePath: string,
     private readonly send: (m: ServerMessage) => void,
-    private readonly extras: { systemPrompt?: string; servers?: Record<string, Record<string, unknown>>; allowedTools?: string[] } = {},
+    private readonly extras: {
+      systemPrompt?: string;
+      servers?: Record<string, Record<string, unknown>>;
+      allowedTools?: string[];
+      /** The designer asked for something (a visual review starts). */
+      onTurnStart?: (text: string) => void;
+      /** Claude is about to edit this file; the edit waits for it (up to 25 s), e.g. for before screenshots. */
+      onEditStart?: (absPath: string) => Promise<void>;
+      /** Claude's turn is over. */
+      onTurnEnd?: () => void;
+    } = {},
   ) {
     this.servers = { ...(extras.servers ?? {}) };
   }
@@ -177,6 +187,11 @@ export class ClaudeSession {
     if (id === 'before-edit' && toolUseId && p) {
       const abs = resolve(this.cwd, p);
       this.beforeSnapshots.set(toolUseId, { path: abs, content: await readFile(abs, 'utf8').catch(() => ''), tool: String(input.tool_name ?? 'Edit') });
+      if (this.extras.onEditStart) {
+        let t: ReturnType<typeof setTimeout> | undefined;
+        await Promise.race([this.extras.onEditStart(abs).catch(() => undefined), new Promise((r) => (t = setTimeout(r, 25000)))]);
+        clearTimeout(t);
+      }
     }
     if (id === 'after-edit' && toolUseId) {
       const snap = this.beforeSnapshots.get(toolUseId);
@@ -245,6 +260,7 @@ export class ClaudeSession {
     });
     this.busy = true;
     this.status();
+    if (!text.startsWith('/')) this.extras.onTurnStart?.(text);
     const notes = this.notes.splice(0);
     const lead = [...notes.map((n) => `[Designer] ${n}`), context ? `[Designer] ${context}` : ''].filter(Boolean).join('\n');
     const full = lead && !text.startsWith('/') ? `${lead}\n\n${text}` : text;
@@ -280,6 +296,14 @@ export class ClaudeSession {
     await this.need().request({ subtype: 'set_permission_mode', mode });
     this.mode = mode;
     this.status();
+  }
+
+  /** Adds (or replaces) an MCP server for this session, now if Claude Code is running, else at start. */
+  async addServer(name: string, config: Record<string, unknown>) {
+    if (JSON.stringify(this.servers[name]) === JSON.stringify(config)) return;
+    this.servers[name] = config;
+    if (!this.cli) return;
+    await this.cli.request({ subtype: 'mcp_set_servers', servers: this.servers });
   }
 
   async connectFigma(url: string) {
@@ -395,6 +419,7 @@ export class ClaudeSession {
       const text = ok ? '' : String(m.result ?? (m.errors as string[] | undefined)?.join('\n') ?? m.subtype);
       this.send({ type: 'item', item: { kind: 'result', id: (m.uuid as string) ?? randomUUID(), ok, text, costUsd: m.total_cost_usd as number, durationMs: m.duration_ms as number, turns: m.num_turns as number } });
       this.status();
+      this.extras.onTurnEnd?.();
       return;
     }
     if (m.type === 'system' && m.subtype === 'compact_boundary') {

@@ -23,17 +23,28 @@
     "build:server": "esbuild src/server/cli.ts src/server/index.ts --bundle --platform=node --format=esm --target=node20 --outdir=dist/server --out-extension:.js=.mjs --packages=external",
     "start": "node dist/server/cli.mjs",
     "electron": "npm run build && electron .",
-    "dist:mac": "npm run build && electron-builder --mac --publish never",
+    "dist:mac": "npm run build && electron-builder --config electron-builder.config.cjs --mac --publish never",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
-    "test": "vitest run"
+    "test": "vitest run",
+    "smoke:ui": "npm run build && vitest run --config vitest.ui.config.ts",
+    "test:smoke:setup": "DESIGNER_SMOKE_REAL=1 vitest run test/smoke-setup.test.ts test/smoke-real.test.ts",
+    "test:e2e": "vitest run --config vitest.e2e.config.ts",
+    "test:smoke": "npm run build && node test/smoke/electron-smoke.mjs",
+    "test:all": "npm run typecheck && npm run lint && npm test && npm run build && npm run test:e2e && node ../editor/tests/e2e.cjs",
+    "test:smoke:sync": "node test/e2e/sync-smoke.mjs",
+    "test:smoke:collab": "node test/smoke/collab.smoke.mjs"
   },
   "dependencies": {
+    "electron-updater": "^6.8.11",
+    "playwright-core": "^1.63.0",
+    "pngjs": "^7.0.0",
     "ws": "^8.23.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/node": "^26.6.6",
+    "@types/pngjs": "^6.0.5",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@types/ws": "^8.18.2",
@@ -44,47 +55,13 @@
     "esbuild": "^0.28.2",
     "eslint": "^10.15.0",
     "eslint-plugin-react-hooks": "^7.1.1",
+    "globals": "^17.14.0",
+    "playwright": "1.63.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.73.0",
     "vite": "^8.3.8",
     "vitest": "^5.1.1"
-  },
-  "build": {
-    "appId": "dev.designer.app",
-    "productName": "Designer",
-    "directories": {
-      "output": "release",
-      "buildResources": "build"
-    },
-    "files": [
-      "electron/**",
-      "dist/**",
-      "package.json"
-    ],
-    "asar": true,
-    "mac": {
-      "category": "public.app-category.developer-tools",
-      "target": [
-        {
-          "target": "dmg",
-          "arch": [
-            "x64",
-            "arm64"
-          ]
-        },
-        {
-          "target": "zip",
-          "arch": [
-            "x64",
-            "arm64"
-          ]
-        }
-      ],
-      "identity": null,
-      "hardenedRuntime": false
-    },
-    "artifactName": "${productName}-${version}-${arch}.${ext}"
   }
 }

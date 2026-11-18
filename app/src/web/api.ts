@@ -1,9 +1,28 @@
 import type { ClientMessage, ServerMessage } from '../shared/protocol';
 
+/** What the Mac app's updater is doing, sent from the main process. */
+export interface UpdateState {
+  state: 'disabled' | 'idle' | 'checking' | 'none' | 'downloading' | 'ready' | 'available' | 'error';
+  /** The newer version, once one is found. */
+  version?: string;
+  /** For unsigned builds: where to download the new version by hand. */
+  url?: string;
+  percent?: number;
+  error?: string;
+}
+
 declare global {
   interface Window {
     __DESIGNER_TOKEN__?: string;
-    designerNative?: { pickFolder(): Promise<string | null>; openExternal(url: string): void; isElectron: true };
+    designerNative?: {
+      pickFolder(): Promise<string | null>;
+      openExternal(url: string): void;
+      isElectron: true;
+      getUpdate?(): Promise<UpdateState>;
+      onUpdate?(cb: (s: UpdateState) => void): () => void;
+      installUpdate?(): void;
+      checkForUpdates?(): void;
+    };
   }
 }
 declare const __DEV_TOKEN__: string;
@@ -63,3 +82,8 @@ export class Socket {
 }
 
 export const socket = new Socket();
+
+/** Address of one before/after/diff image of a visual review (images can't send the token header). */
+export function reviewImage(id: string, file: string, bust = '') {
+  return `/api/review-image?id=${encodeURIComponent(id)}&file=${encodeURIComponent(file)}&token=${encodeURIComponent(token())}${bust ? `&v=${bust}` : ''}`;
+}

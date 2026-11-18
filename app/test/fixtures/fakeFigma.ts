@@ -2,7 +2,7 @@ import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 
 /** A stand-in for Figma's desktop MCP server: streamable HTTP, SSE replies, a session id. */
-export async function fakeFigma(opts: { selection: string; tools?: string[] }): Promise<{ url: string; close: () => Promise<void>; calls: string[] }> {
+export async function fakeFigma(opts: { selection: string; tools?: string[]; variables?: string }): Promise<{ url: string; close: () => Promise<void>; calls: string[] }> {
   const calls: string[] = [];
   const tools = opts.tools ?? ['get_design_context', 'get_metadata', 'get_screenshot', 'get_variable_defs'];
   const server: Server = createServer((req, res) => {
@@ -30,6 +30,8 @@ export async function fakeFigma(opts: { selection: string; tools?: string[] }): 
             ? { content: [{ type: 'text', text: opts.selection }] }
             : { isError: true, content: [{ type: 'text', text: 'Nothing is selected' }] };
       }
+      if (msg.method === 'tools/call' && msg.params?.name === 'get_variable_defs')
+        result = opts.variables ? { content: [{ type: 'text', text: opts.variables }] } : { isError: true, content: [{ type: 'text', text: 'Nothing is selected' }] };
       if (msg.method === 'tools/call' && msg.params?.name === 'get_screenshot') result = { content: [{ type: 'image', data: 'iVBORw0KGgo=', mimeType: 'image/png' }] };
       res.writeHead(200, { 'content-type': 'text/event-stream', 'mcp-session-id': 'sess-1' });
       res.end(`event: message\ndata: ${JSON.stringify({ jsonrpc: '2.0', id: msg.id, result })}\n\n`);

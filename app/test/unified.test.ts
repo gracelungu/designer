@@ -11,6 +11,7 @@ const host = (over: Partial<ToolHost> = {}): ToolHost => ({
   addNodes: async (n) => ({ added: n.length }),
   updateNodes: async (u) => ({ updated: u.length }),
   showComponent: async (id) => `Placed ${id}`,
+  designTokens: async (status) => ({ status }),
   ...over,
 });
 

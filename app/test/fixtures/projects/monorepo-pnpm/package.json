@@ -1,0 +1,1 @@
+{ "name": "mono", "private": true, "scripts": { "build": "turbo build", "lint": "turbo lint" } }

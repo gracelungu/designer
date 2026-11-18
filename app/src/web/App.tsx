@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
-import type { Capabilities, ClaudeInstall, ProjectInfo } from '../shared/protocol';
+import type { Capabilities, ClaudeInstall, ProjectInfo, SetupState, VisualReview } from '../shared/protocol';
 import { api, socket } from './api';
 import { chatReducer, initialChat } from './store';
 import { Chat, Menu, Spark, type CanvasContext, type Prefs } from './components/Chat';
@@ -10,7 +10,18 @@ import { ProjectPicker } from './components/ProjectPicker';
 import { DesignPanel } from './components/DesignPanel';
 import { CodePanel, RenderedStyles, useCanvasTick } from './components/CodePanel';
 import { ComponentsPanel } from './components/ComponentsPanel';
+import { LayerTokens } from './components/LayerTokens';
+import { useTokenReport } from './tokens';
+import { SetupCard } from './components/SetupCard';
 import { canvasHost, reconnectLive, type CanvasHost } from './canvas/host';
+import { Onboarding, type StartChoice } from './components/Onboarding';
+import { UpdatePill } from './components/UpdatePill';
+import { SyncBar, SyncPanel } from './components/SyncPanel';
+import { SyncController } from './sync/controller';
+import { CommentsPanel } from './components/CommentsPanel';
+import { download } from '../../../editor/src/index.js';
+import { ReviewViewer, SendForReview, VisualChanges } from './components/VisualReview';
+import { VersionsPanel } from './components/Versions';
 
 interface Status {
   claude: ClaudeInstall;
@@ -18,6 +29,8 @@ interface Status {
   home: string;
   workspace: string;
   platform: string;
+  onboarded: boolean;
+  demo: boolean;
 }
 
 const Logo = () => (
@@ -30,12 +43,24 @@ const Logo = () => (
 
 export function App() {
   const [status, setStatus] = useState<Status>();
+  const [start, setStart] = useState<StartChoice>();
   useEffect(() => {
     void api<Status>('/api/status').then(setStatus);
   }, []);
   if (!status) return <div className="welcome">Starting Designer…</div>;
+  if (!status.onboarded)
+    return (
+      <Onboarding
+        claude={status.claude}
+        demo={status.demo}
+        onDone={(choice, claude) => {
+          setStart(choice);
+          setStatus({ ...status, claude, onboarded: true });
+        }}
+      />
+    );
   if (!status.claude.found || !status.claude.loggedIn) return <ClaudeSetup status={status} onRecheck={(c) => setStatus({ ...status, claude: c })} />;
-  return <Workspace status={status} />;
+  return <Workspace status={status} start={start} />;
 }
 
 function ClaudeSetup({ status, onRecheck }: { status: Status; onRecheck: (c: ClaudeInstall) => void }) {
@@ -64,20 +89,25 @@ function ClaudeSetup({ status, onRecheck }: { status: Status; onRecheck: (c: Cla
   );
 }
 
-type LeftTab = 'chat' | 'layers' | 'components';
+type LeftTab = 'chat' | 'layers' | 'components' | 'comments' | 'versions';
 type ChatView = 'chat' | 'history' | 'claude';
 
-function Workspace({ status }: { status: Status }) {
+function Workspace({ status, start }: { status: Status; start?: StartChoice }) {
   const [chat, dispatch] = useReducer(chatReducer, initialChat);
   const [project, setProject] = useState<ProjectInfo | null>(null);
+  const [setup, setSetup] = useState<SetupState | null>(null);
   const [caps, setCaps] = useState<Capabilities>();
   const [capsError, setCapsError] = useState('');
   const [left, setLeft] = useState<LeftTab>('chat');
   const [chatView, setChatView] = useState<ChatView>('chat');
   const [side, setSide] = useState<'figma' | 'code'>('figma');
-  const [codeTab, setCodeTab] = useState<'tokens' | 'changes'>('changes');
+  const [codeTab, setCodeTab] = useState<'layer' | 'tokens' | 'changes'>('changes');
+  const tokens = useTokenReport();
+  const drift = tokens.report?.summary.drift ?? 0;
   const [modal, setModal] = useState<'save' | 'share' | 'figma' | 'project' | null>(null);
   const [projectMenu, setProjectMenu] = useState(false);
+  const [reviews, setReviews] = useState<VisualReview[]>([]);
+  const [viewing, setViewing] = useState<VisualReview>();
   const [toast, setToast] = useState<{ text: string; url?: string; busy?: boolean }>();
   // Messages that are not progress go away by themselves; errors stay a little longer.
   useEffect(() => {
@@ -93,6 +123,13 @@ function Workspace({ status }: { status: Status }) {
   const host = hostRef.current;
   const editor = host.editor;
   useSelectionTick(editor);
+  const syncRef = useRef<SyncController>(undefined);
+  if (!syncRef.current) syncRef.current = new SyncController({ store: editor.store, measure: (id) => host.measureStory(id), reloadLive: () => host.reloadLive(), api });
+  const sync = syncRef.current;
+  const [syncOpen, setSyncOpen] = useState(false);
+  // For automated checks (the smoke test drives the canvas through this).
+  (window as unknown as { __designer?: unknown }).__designer = { host, sync };
+  useCommentsTick(editor);
 
   const loadCaps = useCallback((refresh = false) => {
     setCapsError('');
@@ -111,11 +148,42 @@ function Workspace({ status }: { status: Status }) {
         else lsDel('designer.lastProject');
         setRunning({});
         void host.load();
+        void api<VisualReview[]>('/api/visual-reviews').then(setReviews, () => setReviews([]));
         return;
       }
+      if (m.type === 'setup') {
+        setSetup(m.setup);
+        // A finished setup may have installed or found new things: refresh the components list.
+        if (m.setup && m.setup.status !== 'running') void refreshProject();
+        return;
+      }
+      if (m.type === 'review') {
+        setReviews((list) => [m.review, ...list.filter((r) => r.id !== m.review.id)].sort((a, b) => b.createdAt - a.createdAt));
+        setViewing((v) => (v?.id === m.review.id ? m.review : v));
+        if (!m.review.capturing && m.review.shots.some((s) => s.changed)) setCodeTab('changes');
+        return;
+      }
+      if (m.type === 'share-step') return;
       if (m.type === 'run') {
         setRunning((r) => ({ ...r, [m.kind]: m.url }));
         if (m.kind === 'app') void host.showPage(m.url);
+        return;
+      }
+      if (m.type === 'sync') {
+        sync.onJob(m.job);
+        if (m.job.status === 'review') {
+          setSide('code');
+          setSyncOpen(true);
+        }
+        return;
+      }
+      if (m.type === 'code-changed') {
+        void refreshProject();
+        void sync.onCodeChanged(m.change);
+        return;
+      }
+      if (m.type === 'comments') {
+        host.setComments(m.comments);
         return;
       }
       if (m.type === 'canvas-op') {
@@ -130,7 +198,15 @@ function Workspace({ status }: { status: Status }) {
     });
     (async () => {
       const last = status.project ?? lsGet('designer.lastProject');
-      if (last) {
+      if (start === 'demo') {
+        try {
+          setProject(await api<ProjectInfo>('/api/demo', {}));
+          setLeft('components');
+        } catch (e) {
+          setToast({ text: (e as Error).message });
+        }
+      } else if (start === 'project') setModal('project');
+      else if (last) {
         try {
           setProject(await api<ProjectInfo>('/api/project', { path: last }));
         } catch {
@@ -138,6 +214,8 @@ function Workspace({ status }: { status: Status }) {
         }
       }
       await host.load();
+      void sync.loadJobs();
+      void api<VisualReview[]>('/api/visual-reviews').then(setReviews, () => undefined);
       const r = await api<{ app: string | null; storybook: string | null }>('/api/run').catch(() => ({ app: null, storybook: null }));
       setRunning(r);
       socket.send({ type: 'start', model: prefs.model, effort: prefs.effort, mode: prefs.mode });
@@ -199,13 +277,30 @@ function Workspace({ status }: { status: Status }) {
 
   const gitAction = async (path: string, body: unknown) => {
     try {
-      const r = await api<{ ok: boolean; message: string; url?: string }>(path, body);
+      const r = await api<{ ok: boolean; message: string; url?: string; files?: string[] }>(path, body);
       setToast({ text: r.message, url: r.url });
       await refreshProject();
+      // What the team changed in the design (canvas, comments) shows on the canvas straight away.
+      // Code-only pulls leave the canvas alone: linked layers follow the code through sync instead.
+      if (path === '/api/git/latest' && r.ok && (!r.files || r.files.some((f) => f.startsWith('.designer/')))) await host.load();
     } catch (e) {
       setToast({ text: (e as Error).message });
     }
   };
+
+  /** Writes the shareable preview into the project (or Designer's folder) and downloads its page. */
+  const exportPreview = async (opts: { quiet?: boolean } = {}) => {
+    const r = await api<{ files: string[]; link: string | null; html: string; dir: string; inProject: boolean }>('/api/preview', { frames: host.previewFrames() });
+    if (opts.quiet) return r;
+    download('design-preview.html', r.html, 'text/html');
+    setToast({
+      text: r.inProject ? `Saved a design preview in .designer/preview and downloaded it. ${r.link ? 'Share for review to send developers the link.' : 'Save a version to keep it with the project.'}` : 'Downloaded the design preview.',
+    });
+    await refreshProject();
+    return r;
+  };
+
+
 
   const placeStory = async (storyId: string, nextTo = false) => {
     const entry = project?.stories.find((e) => e.stories.some((x) => x.id === storyId));
@@ -237,6 +332,19 @@ function Workspace({ status }: { status: Status }) {
   const changedFiles = new Set(chat.changes.map((c) => c.path)).size;
   const git = project?.git;
   const hasSelection = editor.store.selection.length > 0;
+  // Selecting a layer shows its code; the Tokens and Changes tabs stay one click away.
+  const [lastSel, setLastSel] = useState(hasSelection);
+  if (lastSel !== hasSelection) {
+    setLastSel(hasSelection);
+    if (hasSelection) setCodeTab('layer');
+    else if (codeTab === 'layer') setCodeTab('changes');
+  }
+  const openTokens = () => (setSide('code'), setCodeTab('tokens'));
+
+  const codePanel = (
+    <CodePanel editor={editor} stories={project?.stories ?? []} onAsk={(p) => (p.endsWith(': ') ? (setLeft('chat'), setChatView('chat'), window.dispatchEvent(new CustomEvent('designer:focus-chat'))) : ask(p))} onShowStory={(id, next) => void placeStory(id, next)} />
+  );
+  const openComments = host.comments().filter((c) => !c.resolved).length;
 
   const chatHeader = (
     <div className="chat-head">
@@ -285,8 +393,11 @@ function Workspace({ status }: { status: Status }) {
               <button className="opt" onClick={() => (setModal('project'), setProjectMenu(false))}>
                 <span>Open another project…</span>
               </button>
-              <button className="opt" onClick={() => (ask('Work out how this project runs and start it so I can see it on the canvas.', false), setProjectMenu(false))}>
-                <span>Run it</span>
+              <button className="opt" onClick={() => (void api('/api/project/setup', {}), setProjectMenu(false))}>
+                <span>Run it again</span>
+              </button>
+              <button className="opt" onClick={() => (exportPreview().catch((e: Error) => setToast({ text: e.message })), setProjectMenu(false))}>
+                <span>Export design preview</span>
               </button>
               <button className="opt" onClick={() => (void api('/api/project/close', {}), setProjectMenu(false))}>
                 <span>Close project</span>
@@ -295,13 +406,14 @@ function Workspace({ status }: { status: Status }) {
           )}
         </div>
         <span className="spacer" />
+        <UpdatePill />
         <button className="btn" onClick={() => setModal('figma')}>Import from Figma</button>
         {project ? (
           <>
             <button className="btn" onClick={() => gitAction('/api/git/latest', {})} disabled={!git?.remote} title="Pull what the team changed">
               Get latest {git && git.behind > 0 && <span className="badge dark">{git.behind}</span>}
             </button>
-            <button className="btn" onClick={() => setModal('save')} disabled={!git?.isRepo}>
+            <button className="btn" onClick={() => setModal('save')} disabled={!git?.isRepo} title="Add the current state to version history">
               Save version {git && git.changed.length > 0 && <span className="badge">{git.changed.length}</span>}
             </button>
             <button className="btn primary" onClick={() => setModal('share')} disabled={!git?.remote}>Share for review</button>
@@ -314,9 +426,10 @@ function Workspace({ status }: { status: Status }) {
       <div className="body">
         <aside className="side left">
           <div className="tabs">
-            {(['chat', 'layers', 'components'] as LeftTab[]).map((t) => (
+            {(['chat', 'layers', 'components', 'comments', 'versions'] as LeftTab[]).map((t) => (
               <button key={t} className={left === t ? 'on' : ''} onClick={() => setLeft(t)}>
-                {t === 'chat' ? 'Chat' : t === 'layers' ? 'Layers' : 'Components'}
+                {t === 'chat' ? 'Chat' : t === 'layers' ? 'Layers' : t === 'components' ? 'Components' : t === 'comments' ? 'Comments' : 'Versions'}
+                {t === 'comments' && openComments > 0 && <span className="badge dark">{openComments}</span>}
               </button>
             ))}
           </div>
@@ -339,14 +452,30 @@ function Workspace({ status }: { status: Status }) {
           <div className={`pane ${left === 'layers' ? '' : 'hidden'}`}>
             <Adopt el={host.layersEl} />
           </div>
+          <div className={`pane ${left === 'comments' ? '' : 'hidden'}`}>
+            <CommentsPanel
+              comments={host.comments()}
+              layerName={(id) => (id ? editor.store.get(id)?.name : undefined)}
+              hasProject={!!project}
+              onOpen={(id) => editor.comments.open(id)}
+              onAsk={(p) => ask(p, false)}
+              onAddComment={() => editor.setTool('comment')}
+              onOpenUrl={(url) => (window.designerNative ? window.designerNative.openExternal(url) : window.open(url, '_blank', 'noopener'))}
+            />
+          </div>
           <div className={`pane ${left === 'components' ? '' : 'hidden'}`} data-canvas-keys="off">
             <ComponentsPanel project={project} storybookRunning={!!running.storybook} onPlace={(id) => placeStory(id)} onAsk={(p) => ask(p, false)} onAddProject={() => setModal('project')} />
+          </div>
+          <div className={`pane ${left === 'versions' ? '' : 'hidden'}`}>
+            {left === 'versions' && <VersionsPanel hasProject={!!project} onToast={setToast} onAsk={(p) => ask(p, false)} />}
           </div>
         </aside>
 
         <main className="stage">
           <Adopt el={host.stage} className="stage-host" />
+          <SyncBar sync={sync} onOpen={() => (setSide('code'), setSyncOpen(true))} />
           <CanvasHint editor={editor} onFigma={() => setModal('figma')} onComponents={() => setLeft('components')} />
+          <SetupCard setup={setup} onRetry={() => void api('/api/project/setup', {}).catch(() => undefined)} onAsk={(p) => ask(p, false)} />
         </main>
 
         <aside className="side right">
@@ -360,6 +489,11 @@ function Workspace({ status }: { status: Status }) {
                 <svg width="12" height="12" viewBox="0 0 16 16" aria-hidden="true"><path d="M5.5 4.5L2 8l3.5 3.5M10.5 4.5L14 8l-3.5 3.5" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" /></svg>
                 Code
                 {changedFiles > 0 && <span className="badge dark">{changedFiles}</span>}
+                {drift > 0 && (
+                  <span className="badge" title={`${drift} token${drift === 1 ? '' : 's'} differ between Figma and code`} aria-label={`${drift} tokens differ`}>
+                    {drift}!
+                  </span>
+                )}
               </button>
             </div>
           </div>
@@ -367,21 +501,38 @@ function Workspace({ status }: { status: Status }) {
             <div className="scroll">
               <Adopt el={host.propsEl} />
               <RenderedStyles editor={editor} />
+              {project && <LayerTokens editor={editor} onOpenTokens={openTokens} />}
             </div>
           </div>
           <div className={`pane ${side === 'code' ? '' : 'hidden'}`} data-canvas-keys="off">
-            {hasSelection ? (
-              <CodePanel editor={editor} stories={project?.stories ?? []} onAsk={(p) => (p.endsWith(': ') ? (setLeft('chat'), setChatView('chat'), window.dispatchEvent(new CustomEvent('designer:focus-chat'))) : ask(p))} onShowStory={(id, next) => void placeStory(id, next)} />
+            {syncOpen ? (
+              <SyncPanel sync={sync} onClose={() => setSyncOpen(false)} onSelect={(id) => (editor.store.select([id]), editor.zoomToSelection())} />
             ) : project ? (
               <>
                 <div className="tabs sub">
+                  {hasSelection && (
+                    <button className={codeTab === 'layer' ? 'on' : ''} onClick={() => setCodeTab('layer')}>
+                      Layer
+                    </button>
+                  )}
                   <button className={codeTab === 'changes' ? 'on' : ''} onClick={() => setCodeTab('changes')}>
                     Changes {changedFiles > 0 && <span className="badge dark">{changedFiles}</span>}
                   </button>
-                  <button className={codeTab === 'tokens' ? 'on' : ''} onClick={() => setCodeTab('tokens')}>Tokens</button>
+                  <button className={codeTab === 'tokens' ? 'on' : ''} onClick={() => setCodeTab('tokens')}>
+                    Tokens {drift > 0 && <span className="badge">{drift}</span>}
+                  </button>
+                  <button onClick={() => setSyncOpen(true)}>Sync</button>
                 </div>
-                {codeTab === 'tokens' ? <DesignPanel onAsk={(p) => ask(p, false)} onChanged={() => void refreshProject()} /> : <Changes changes={chat.changes} git={project.git} />}
+                {codeTab === 'layer' && hasSelection ? (
+                  codePanel
+                ) : codeTab === 'tokens' ? (
+                  <DesignPanel onAsk={(p) => ask(p, false)} onChanged={() => void refreshProject()} />
+                ) : (
+                  <Changes changes={chat.changes} git={project.git} visual={<VisualChanges reviews={reviews} onOpen={setViewing} />} />
+                )}
               </>
+            ) : hasSelection ? (
+              codePanel
             ) : (
               <div className="empty">Select a layer to see it as code. Add a project to see its tokens and what changed.</div>
             )}
@@ -395,6 +546,10 @@ function Workspace({ status }: { status: Status }) {
             <ProjectPicker
               home={status.home}
               current={project?.path}
+              onDemo={status.demo ? async () => {
+                await api<ProjectInfo>('/api/demo', {});
+                setModal(null);
+              } : undefined}
               onCancel={() => setModal(null)}
               onOpen={async (path) => {
                 await api<ProjectInfo>('/api/project', { path });
@@ -406,24 +561,18 @@ function Workspace({ status }: { status: Status }) {
       )}
       {modal === 'save' && (
         <TextModal
-          title="Save version"
-          body="Saves everything that changed, the canvas included, as a version you can come back to."
-          placeholder="What changed? e.g. Denser pricing cards"
+          title="Add to version history"
+          body="Saves everything that changed, the canvas included, as a named version you can come back to from the Versions tab."
+          placeholder="Title, e.g. Denser pricing cards"
           action="Save version"
           onClose={() => setModal(null)}
-          onSubmit={(t) => gitAction('/api/git/save', { message: t })}
+          onSubmit={(t) => gitAction('/api/versions/name', { name: t || 'Design update' })}
         />
       )}
       {modal === 'share' && (
-        <TextModal
-          title="Share for review"
-          body="Sends your saved versions to the team as a pull request, on a branch of their own."
-          placeholder="Title for the review"
-          action="Share"
-          onClose={() => setModal(null)}
-          onSubmit={(t) => gitAction('/api/git/share', { title: t })}
-        />
+        <SendForReview reviews={reviews} unsaved={git?.changed.length ?? 0} onClose={() => setModal(null)} onDone={() => void refreshProject()} onPreview={() => exportPreview({ quiet: true })} />
       )}
+      {viewing && <ReviewViewer review={viewing} onClose={() => setViewing(undefined)} onAsk={(p) => (setLeft('chat'), setChatView('chat'), window.dispatchEvent(new CustomEvent('designer:prefill', { detail: p })))} />}
       {modal === 'figma' && <FigmaImport sessionRunning={s.running} onClose={() => (setModal(null), setLeft('chat'), setChatView('chat'))} />}
       {toast && (
         <div className={`toast ${toast.busy ? 'busy' : ''}`} role="status">
@@ -452,6 +601,21 @@ function useSelectionTick(editor: CanvasHost['editor']) {
   useEffect(() => editor.store.on((ch) => (ch.has('selection') ? tick() : undefined)), [editor]);
 }
 
+/** Re-renders when comments may have changed (a commit, or comments arriving from the team or Claude). */
+function useCommentsTick(editor: CanvasHost['editor']) {
+  const [, tick] = useReducer((x: number) => x + 1, 0);
+  useEffect(() => {
+    let last = '';
+    return editor.store.on((ch) => {
+      if (!ch.has('commit') && !ch.has('comments') && !ch.has('doc')) return;
+      const now = JSON.stringify(editor.store.doc.comments ?? []);
+      if (now === last) return;
+      last = now;
+      tick();
+    });
+  }, [editor]);
+}
+
 /** Shows a DOM element owned by the canvas (layers, properties, the canvas itself) inside React's tree. */
 function Adopt({ el, className }: { el: HTMLElement; className?: string }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -477,17 +641,23 @@ function CanvasHint({ editor, onFigma, onComponents }: { editor: CanvasHost['edi
   );
 }
 
-function TextModal({ title, body, placeholder, action, onClose, onSubmit }: { title: string; body: string; placeholder: string; action: string; onClose: () => void; onSubmit: (t: string) => void }) {
+function TextModal({ title, body, placeholder, action, option, onClose, onSubmit }: { title: string; body: string; placeholder: string; action: string; option?: string; onClose: () => void; onSubmit: (t: string, option?: boolean) => void }) {
   const [text, setText] = useState('');
+  const [checked, setChecked] = useState(true);
   return (
     <div className="modal-back" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()} data-canvas-keys="off">
         <h3>{title}</h3>
         <p>{body}</p>
-        <input className="input" style={{ width: '100%' }} autoFocus placeholder={placeholder} value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && (onSubmit(text), onClose())} />
+        <input className="input" style={{ width: '100%' }} autoFocus placeholder={placeholder} value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && (onSubmit(text, option ? checked : undefined), onClose())} />
+        {option && (
+          <label className="modal-option">
+            <input type="checkbox" checked={checked} onChange={(e) => setChecked(e.target.checked)} /> {option}
+          </label>
+        )}
         <div className="actions">
           <button className="btn" onClick={onClose}>Cancel</button>
-          <button className="btn primary" onClick={() => (onSubmit(text), onClose())}>{action}</button>
+          <button className="btn primary" onClick={() => (onSubmit(text, option ? checked : undefined), onClose())}>{action}</button>
         </div>
       </div>
     </div>

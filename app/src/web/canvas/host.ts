@@ -1,7 +1,7 @@
 // Creates the canvas editor once, with its toolbar, layers and properties panels, so React can
 // place those panels in the app's own sidebars without remounting them.
-import { bindShortcuts, emptyDoc, Editor, LayersPanel, PropertiesPanel, Toolbar, type EditorNode } from '../../../../editor/src/index.js';
-import type { CanvasOp } from '../../shared/protocol';
+import { bindShortcuts, cssFor, emptyDoc, Editor, exportSVG, LayersPanel, PropertiesPanel, Toolbar, type EditorNode } from '../../../../editor/src/index.js';
+import type { CanvasComment, CanvasOp, PreviewFrame } from '../../shared/protocol';
 import { api } from '../api';
 import { buildNodes, canvasState, freeSpot, placeAt, selectionContext, storyIds, applySimple } from './convert';
 
@@ -16,7 +16,17 @@ export interface CanvasHost {
   placeStory(storyId: string, opts?: { nextToSelection?: boolean; title?: string; file?: string; args?: Record<string, unknown> }): Promise<string>;
   showPage(url: string, name?: string): Promise<string>;
   state(): ReturnType<typeof canvasState>;
+  /** Renders a story out of sight and resolves with the styles its probe reports. */
+  measureStory(storyId: string, timeoutMs?: number): Promise<Record<string, string>>;
+  /** Reloads every live component and page frame, so they show code that just changed. */
+  reloadLive(): void;
   context(): ReturnType<typeof selectionContext>;
+  /** Comments as the canvas has them now. */
+  comments(): CanvasComment[];
+  /** Takes comments saved elsewhere (a teammate's, after Get latest, or Claude's replies). */
+  setComments(list: CanvasComment[]): void;
+  /** Every top-level frame drawn for a shareable preview. */
+  previewFrames(): PreviewFrame[];
 }
 
 let host: CanvasHost | undefined;
@@ -41,10 +51,17 @@ export function canvasHost(onAskAI: () => void): CanvasHost {
   bindShortcuts(editor, { layers, onAskAI });
 
   // Save the canvas next to the project (in .designer/canvas.json), so it travels with the repo.
+  // Comments are saved on their own, one file per thread, as soon as they change.
   let saveTimer: ReturnType<typeof setTimeout> | undefined;
   let loading = false;
+  let savedComments = '[]';
   store.on((ch) => {
     if (!ch.has('commit') || loading) return;
+    const comments = JSON.stringify(store.doc.comments ?? []);
+    if (comments !== savedComments) {
+      savedComments = comments;
+      void api('/api/comments', { comments: store.doc.comments ?? [] }).catch(() => undefined);
+    }
     clearTimeout(saveTimer);
     saveTimer = setTimeout(() => void api('/api/canvas', { data: { version: 1, doc: store.doc, assets: store.assets } }).catch(() => undefined), 600);
   });
@@ -73,10 +90,13 @@ export function canvasHost(onAskAI: () => void): CanvasHost {
       clearTimeout(saveTimer);
       loading = true;
       try {
-        const r = await api<{ data: { doc?: unknown; assets?: Record<string, string> } | null }>('/api/canvas').catch(() => ({ data: null }));
+        const r = await api<{ data: { doc?: { comments?: unknown[] }; assets?: Record<string, string> } | null; comments?: CanvasComment[]; author?: string }>('/api/canvas').catch(() => ({ data: null, comments: [] as CanvasComment[], author: undefined }));
         const data = r.data;
         if (data && data.doc) store.load(data.doc, data.assets ?? {});
         else store.load(emptyDoc(), {});
+        store.doc.comments = r.comments ?? [];
+        savedComments = JSON.stringify(store.doc.comments);
+        if (r.author) editor.comments.author = r.author;
         store.view.x = 0;
         store.view.y = 0;
         store.view.zoom = 1;
@@ -166,7 +186,81 @@ export function canvasHost(onAskAI: () => void): CanvasHost {
       focusOn([id]);
       return id;
     },
+    comments: () => (store.doc.comments ?? []) as CanvasComment[],
+    setComments(list) {
+      const next = JSON.stringify(list);
+      if (next === JSON.stringify(store.doc.comments ?? [])) return;
+      savedComments = next;
+      store.doc.comments = list;
+      if (editor.comments.openId && !list.some((c) => c.id === editor.comments.openId)) editor.comments.close();
+      editor.comments.render();
+      store.emit('comments');
+    },
+    previewFrames() {
+      const tops = store.doc.root.map((id) => store.get(id)!).filter((n) => n && n.visible !== false && ['frame', 'code', 'group', 'component', 'instance'].includes(n.type));
+      const comments = (store.doc.comments ?? []) as CanvasComment[];
+      const inside = (id: string, top: string): boolean => {
+        for (let n = store.get(id); n; n = n.parent ? store.get(n.parent) : undefined) if (n.id === top) return true;
+        return false;
+      };
+      return tops.map((n) => {
+        const box = store.worldBox(n.id);
+        const components: PreviewFrame['components'] = [];
+        const walk = (id: string) => {
+          const c = store.get(id);
+          if (!c) return;
+          if (c.type === 'code' && c.code?.kind === 'component') components.push({ name: c.code.title || c.name, storyId: c.code.storyId, file: c.code.file });
+          else if (c.codeLink && (c.codeLink.storyId || c.codeLink.file)) components.push({ name: c.name, storyId: c.codeLink.storyId, file: c.codeLink.file });
+          for (const k of c.children ?? []) walk(k);
+        };
+        walk(n.id);
+        const pins = comments
+          .map((c) => ({ c, a: editor.comments.anchor(c) }))
+          .filter(({ c, a }) => (c.nodeId && store.get(c.nodeId) ? inside(c.nodeId, n.id) : a.x >= box.x && a.y >= box.y && a.x <= box.x + box.w && a.y <= box.y + box.h))
+          .map(({ c, a }) => ({ id: c.id, x: Math.round(a.x - box.x), y: Math.round(a.y - box.y) }));
+        return { id: n.id, name: n.name, w: box.w, h: box.h, svg: exportSVG(store, [n.id]), css: cssFor(store, n), components, pins };
+      });
+    },
     state: () => canvasState(store),
+    async measureStory(storyId, timeoutMs = 20000) {
+      const { src } = await api<{ src: string }>(`/api/story-src?id=${encodeURIComponent(storyId)}`);
+      return new Promise<Record<string, string>>((resolve, reject) => {
+        const f = document.createElement('iframe');
+        f.setAttribute('aria-hidden', 'true');
+        f.tabIndex = -1;
+        f.style.cssText = 'position:fixed;left:-10000px;top:0;width:1024px;height:768px;visibility:hidden;pointer-events:none;border:0';
+        let settle: ReturnType<typeof setTimeout> | undefined;
+        let last: Record<string, string> | undefined;
+        const end = (err?: Error) => {
+          clearTimeout(settle);
+          clearTimeout(timer);
+          window.removeEventListener('message', onMsg);
+          f.remove();
+          if (last && !err) resolve(last);
+          else reject(err ?? new Error('The component did not render.'));
+        };
+        const onMsg = (e: MessageEvent) => {
+          const d = e.data as { source?: string; type?: string; styles?: Record<string, string>; message?: string };
+          if (e.source !== f.contentWindow || d?.source !== 'designer-probe') return;
+          if (d.type === 'styles' && d.styles) {
+            last = d.styles;
+            // Wait for it to stop changing (fonts, late renders).
+            clearTimeout(settle);
+            settle = setTimeout(() => end(), 500);
+          } else if (d.type === 'error') end(new Error(d.message ?? 'The component failed to render.'));
+        };
+        const timer = setTimeout(() => end(last ? undefined : new Error('The component took too long to render.')), timeoutMs);
+        window.addEventListener('message', onMsg);
+        f.src = src;
+        document.body.append(f);
+      });
+    },
+    reloadLive() {
+      for (const [id, fr] of editor.code.frames) {
+        const n = store.get(id);
+        if (n?.type === 'code' && n.code?.src) fr.iframe.src = n.code.src;
+      }
+    },
     context: () => selectionContext(store),
   };
   return host;

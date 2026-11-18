@@ -1,0 +1,1 @@
+{ "name": "runnable", "scripts": { "dev": "node server.cjs", "storybook": "node storybook.cjs" }, "dependencies": { "local-dep": "file:./local-dep" } }

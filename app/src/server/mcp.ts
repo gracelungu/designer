@@ -9,6 +9,10 @@ export interface ToolHost {
   addNodes(nodes: unknown[], nextToSelection: boolean): Promise<unknown>;
   updateNodes(updates: unknown[]): Promise<unknown>;
   showComponent(storyId: string, args: Record<string, unknown> | undefined, nextToSelection: boolean): Promise<string>;
+  designTokens(status?: string): Promise<unknown>;
+  /** Comments pinned on the canvas, as text. */
+  comments?(includeResolved: boolean): Promise<string>;
+  replyToComment?(id: string, text: string, resolve: boolean | undefined): Promise<string>;
 }
 
 const NODE_SCHEMA = {
@@ -99,6 +103,23 @@ export const TOOLS = [
       required: ['storyId'],
     },
   },
+  {
+    name: 'get_design_tokens',
+    description:
+      "The project's design tokens (CSS custom properties and Tailwind theme values) paired with the Figma variables pulled into the project, and whether each pair is in sync, has drifted, or exists on one side only. Use it before styling anything, to use tokens instead of raw values, and when the user asks to fix drift between Figma and code.",
+    inputSchema: { type: 'object', properties: { status: { type: 'string', enum: ['in-sync', 'drift', 'figma-only', 'code-only'], description: 'Only pairs with this status' } } },
+  },
+  {
+    name: 'get_comments',
+    description:
+      'Read the comments people pinned on the canvas (the team adds them in Designer, and they sync through git). Each has a number, the frame it is on, its text and replies. Use it when the user mentions comments or feedback, or asks you to address them.',
+    inputSchema: { type: 'object', properties: { includeResolved: { type: 'boolean' } } },
+  },
+  {
+    name: 'reply_to_comment',
+    description: 'Reply to a canvas comment (by id or number, from get_comments), for example to say what you changed. Set resolve true once the comment is addressed.',
+    inputSchema: { type: 'object', properties: { id: { type: 'string' }, text: { type: 'string' }, resolve: { type: 'boolean' } }, required: ['id'] },
+  },
 ];
 
 type Rpc = { jsonrpc: '2.0'; id?: string | number; method: string; params?: Record<string, unknown> };
@@ -154,6 +175,14 @@ async function callTool(name: string, a: Record<string, unknown>, host: ToolHost
       return json(await host.updateNodes(Array.isArray(a.updates) ? a.updates : []));
     case 'show_component':
       return host.showComponent(String(a.storyId ?? ''), a.args as Record<string, unknown> | undefined, !!a.nextToSelection);
+    case 'get_design_tokens':
+      return json(await host.designTokens(a.status ? String(a.status) : undefined));
+    case 'get_comments':
+      if (!host.comments) throw new Error('Comments are not available.');
+      return host.comments(!!a.includeResolved);
+    case 'reply_to_comment':
+      if (!host.replyToComment) throw new Error('Comments are not available.');
+      return host.replyToComment(String(a.id ?? ''), String(a.text ?? ''), typeof a.resolve === 'boolean' ? a.resolve : undefined);
     default:
       throw new Error(`Unknown tool ${name}`);
   }
@@ -166,6 +195,8 @@ Designer gives you tools (the "designer" MCP server):
 - run_project: work out how the project runs (package.json scripts, README, framework) and start it; install dependencies first if needed. Use kind "storybook" for the component previews.
 - get_canvas: read what the user has selected on the canvas.
 - add_to_canvas / update_layers: put editable design layers on the canvas (for example a frame you read from Figma with the figma MCP server, or a layout from scratch). Use real values and auto layout.
+- get_design_tokens: the repo's tokens paired with the Figma variables, with drift. Style with these tokens, never raw values when a token exists. When code and Figma disagree, Figma is the design source unless the user says otherwise.
+- get_comments / reply_to_comment: read the comments the team pinned on canvas frames, and answer or resolve them when you address them.
 - show_component: render one coded component (by Storybook story id) on the canvas as a design layer, live from code, so it can sit next to its Figma design and look identical.
 
 When a coded component should match a design: read the design (Figma MCP or get_canvas), use the repo's own tokens and components, then show_component next to the design and compare. If the project has no Storybook stories for a component, write a CSF3 story for it (one story per variant), so Designer can render it on the canvas.`;
