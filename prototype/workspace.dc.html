@@ -1,0 +1,1607 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Designer workspace</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#F0F0F2}
+a{color:#111111}a:hover{color:#111111}
+button,input,select{font-family:inherit}
+@media (max-width: 900px){.side{display:none !important}.hide-sm{display:none !important}}
+</style>
+</helmet>
+<div style="position: relative; height: 100vh; min-height: 820px; display: flex; flex-direction: column; font-family: Inter, system-ui, sans-serif; font-size: 12px; color: #1E1E1E; background: #F0F0F2; overflow: hidden">
+
+<!-- ===== Top bar ===== -->
+<div style="height: 44px; flex: none; display: flex; align-items: center; gap: 8px; padding: 0 10px; background: #FFFFFF; border-bottom: 1px solid #E6E6E6">
+  <span aria-hidden="true" style="display: grid; place-items: center; width: 32px; height: 32px">
+    <svg width="22" height="22" viewBox="0 0 22 22"><rect x="0" y="0" width="22" height="22" rx="6" fill="#111111"></rect><rect x="5" y="5" width="7" height="7" rx="1.5" fill="#FFFFFF"></rect><circle cx="13.5" cy="13.5" r="4" fill="none" stroke="#FFFFFF" stroke-width="1.6"></circle></svg>
+  </span>
+  <button onClick="{{ togRepo }}" style="{{ repoChip }}">
+    <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 4V12.5H14.5V5.5H7.5L6 4Z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"></path></svg>
+    <span style="display: flex; flex-direction: column; align-items: flex-start; line-height: 1.2">
+      <span style="font-weight: 600">{{ repoName }}</span>
+      <span style="font-size: 10.5px; color: #6B6B6B">Version: {{ vname }}</span>
+    </span>
+    <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 3.5L5 6.5L8 3.5" fill="none" stroke="#6B6B6B" stroke-width="1.3"></path></svg>
+  </button>
+  <button onClick="{{ doUndo }}" aria-label="Undo" title="Undo" style="width: 30px; height: 30px; border: 0; background: transparent; border-radius: 6px; display: grid; place-items: center; cursor: pointer; color: #1E1E1E">
+    <svg width="15" height="15" viewBox="0 0 16 16" aria-hidden="true"><path d="M5.5 3L2.5 6L5.5 9M2.5 6H10A3.5 3.5 0 0 1 10 13H7" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+  </button>
+  <div style="flex: 1"></div>
+  <div role="group" aria-label="View" class="hide-sm" style="display: flex; background: #F2F2F3; border-radius: 8px; padding: 2px">
+    <button onClick="{{ viewCanvas }}" style="{{ viewTabs.canvas }}">Canvas</button>
+    <button onClick="{{ viewComponents }}" style="{{ viewTabs.components }}">Components</button>
+  </div>
+  <div style="flex: 1"></div>
+  <button onClick="{{ togClaude }}" style="{{ claudeChip }}">
+    <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5L9.4 6.6L14.5 8L9.4 9.4L8 14.5L6.6 9.4L1.5 8L6.6 6.6Z" fill="#111111"></path></svg>
+    <span style="font-weight: 600">{{ modelName }}</span>
+    <span class="hide-sm" style="color: #6B6B6B">· {{ effort }} · {{ modeShort }}</span>
+  </button>
+  <button onClick="{{ getLatest }}" style="display: flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; border: 1px solid #E0E0E0; background: #fff; border-radius: 6px; font-size: 12px; font-weight: 500; color: #1E1E1E; cursor: pointer">
+    <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2.5V10.5M4.5 7L8 10.5L11.5 7M3 13.5H13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+    <span>{{ latestLabel }}</span>
+    <sc-if value="{{ showLatestBadge }}" hint-placeholder-val="{{ true }}"><span style="min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; background: #111111; color: #fff; font-size: 10px; font-weight: 600; display: grid; place-items: center">3</span></sc-if>
+  </button>
+  <button onClick="{{ openSave }}" style="display: flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; border: 1px solid #E0E0E0; background: #fff; border-radius: 6px; font-size: 12px; font-weight: 500; color: #1E1E1E; cursor: pointer">
+    <span>Save version</span>
+    <sc-if value="{{ hasChanges }}" hint-placeholder-val="{{ false }}"><span style="min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; background: #FDE68A; color: #78350F; font-size: 10px; font-weight: 600; display: grid; place-items: center">{{ changes }}</span></sc-if>
+  </button>
+  <button onClick="{{ openShare }}" style="height: 30px; padding: 0 12px; border: 0; background: #111111; color: #fff; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer">{{ shareLabel }}</button>
+</div>
+
+<!-- ===== Body ===== -->
+<div style="flex: 1; min-height: 0; display: flex">
+
+  <!-- Left panel (shared) -->
+  <div class="side" style="width: 264px; flex: none; background: #FFFFFF; border-right: 1px solid #E6E6E6; display: flex; flex-direction: column; min-height: 0">
+    <div style="display: flex; gap: 2px; padding: 8px 8px 6px; border-bottom: 1px solid #EDEDED">
+      <sc-for list="{{ leftTabs }}" as="lt" hint-placeholder-count="3">
+        <button onClick="{{ lt.pick }}" style="{{ lt.style }}">{{ lt.label }}<sc-if value="{{ lt.dot }}" hint-placeholder-val="{{ false }}"><span style="display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #111111; margin-left: 5px; vertical-align: middle"></span></sc-if></button>
+      </sc-for>
+    </div>
+
+    <!-- Layers -->
+    <sc-if value="{{ leftIs.layers }}" hint-placeholder-val="{{ true }}">
+      <div style="padding: 8px 12px 4px; display: flex; align-items: center; justify-content: space-between">
+        <span style="font-weight: 600; font-size: 11px">Pages</span>
+        <button onClick="{{ openImport }}" style="height: 22px; padding: 0 6px; border: 0; background: transparent; border-radius: 4px; color: #111111; font-size: 11px; font-weight: 500; cursor: pointer">+ From Figma</button>
+      </div>
+      <div style="padding: 0 6px 8px; display: flex; flex-direction: column; gap: 1px; border-bottom: 1px solid #EDEDED">
+        <sc-for list="{{ pages }}" as="pg" hint-placeholder-count="2">
+          <button onClick="{{ pg.pick }}" style="{{ pg.style }}"><span style="{{ pg.dot }}"></span><span>{{ pg.name }}</span><span style="margin-left: auto; color: #6B6B6B; font-size: 11px">{{ pg.kind }}</span></button>
+        </sc-for>
+      </div>
+      <div style="padding: 8px 6px; display: flex; flex-direction: column; gap: 1px; overflow: auto; flex: 1">
+        <sc-for list="{{ layers }}" as="ly" hint-placeholder-count="6">
+          <button onClick="{{ ly.pick }}" style="{{ ly.style }}">
+            <sc-if value="{{ ly.isFrame }}" hint-placeholder-val="{{ true }}"><svg width="12" height="12" viewBox="0 0 16 16" aria-hidden="true"><path d="M5 1.5V14.5M11 1.5V14.5M1.5 5H14.5M1.5 11H14.5" fill="none" stroke="#6B6B6B" stroke-width="1.3"></path></svg></sc-if>
+            <sc-if value="{{ ly.isComp }}" hint-placeholder-val="{{ false }}"><svg width="12" height="12" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5L14.5 8L8 14.5L1.5 8Z" fill="none" stroke="#111111" stroke-width="1.4"></path></svg></sc-if>
+            <sc-if value="{{ ly.isText }}" hint-placeholder-val="{{ false }}"><svg width="12" height="12" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3.5H13M8 3.5V13" fill="none" stroke="#6B6B6B" stroke-width="1.4"></path></svg></sc-if>
+            <sc-if value="{{ ly.isShape }}" hint-placeholder-val="{{ false }}"><svg width="12" height="12" viewBox="0 0 16 16" aria-hidden="true"><rect x="2.5" y="2.5" width="11" height="11" rx="1" fill="none" stroke="#6B6B6B" stroke-width="1.3"></rect></svg></sc-if>
+            <sc-if value="{{ ly.isNote }}" hint-placeholder-val="{{ false }}"><svg width="12" height="12" viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 13.5V8A5.5 5.5 0 1 1 8 13.5Z" fill="none" stroke="#6B6B6B" stroke-width="1.3"></path></svg></sc-if>
+            <span style="{{ ly.labelStyle }}">{{ ly.label }}</span>
+            <sc-if value="{{ ly.hasTag }}" hint-placeholder-val="{{ false }}"><span style="{{ ly.tagStyle }}">{{ ly.tag }}</span></sc-if>
+          </button>
+        </sc-for>
+      </div>
+    </sc-if>
+
+    <!-- Assets -->
+    <sc-if value="{{ leftIs.assets }}" hint-placeholder-val="{{ false }}">
+      <div style="padding: 10px 12px; display: flex; flex-direction: column; gap: 10px; overflow: auto">
+        <div style="font-weight: 600; font-size: 11px; color: #6B6B6B">From your repo · src/components</div>
+        <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px">
+          <sc-for list="{{ assets }}" as="as" hint-placeholder-count="6">
+            <button onClick="{{ as.open }}" style="border: 1px solid #EDEDED; border-radius: 8px; overflow: hidden; background: #fff; padding: 0; cursor: pointer; text-align: left">
+              <span style="height: 54px; background: #F7F7F8; display: grid; place-items: center"><span style="{{ as.thumb }}">{{ as.preview }}</span></span>
+              <span style="padding: 6px 8px; font-size: 11px; font-weight: 500; display: block">{{ as.name }}</span>
+            </button>
+          </sc-for>
+        </div>
+        <div style="color: #6B6B6B; font-size: 11px; line-height: 1.5">Click a component to open it in the Components view.</div>
+      </div>
+    </sc-if>
+
+    <!-- Library -->
+    <sc-if value="{{ leftIs.library }}" hint-placeholder-val="{{ false }}">
+      <div style="padding: 10px 12px; border-bottom: 1px solid #EDEDED; line-height: 1.45">
+        <div style="font-weight: 600">Design system</div>
+        <div style="font-size: 11px; color: #6B6B6B">From {{ storyCount }} stories in your repo. Rendered here, not in Storybook.</div>
+      </div>
+      <div style="padding: 8px 6px; overflow: auto; display: flex; flex-direction: column; gap: 1px">
+        <div style="padding: 6px 8px 4px; font-size: 11px; font-weight: 600; color: #6B6B6B">Foundations</div>
+        <div style="display: flex; align-items: center; gap: 6px; height: 26px; padding: 0 8px"><span style="{{ brandSwatch }}"></span>Colors<span style="margin-left: auto; font-size: 11px; color: #6B6B6B">18</span></div>
+        <div style="display: flex; align-items: center; gap: 6px; height: 26px; padding: 0 8px"><span style="font-weight: 600; font-size: 10px; width: 10px">T</span>Typography<span style="margin-left: auto; font-size: 11px; color: #6B6B6B">9</span></div>
+        <div style="padding: 10px 8px 4px; font-size: 11px; font-weight: 600; color: #6B6B6B">Components</div>
+        <sc-for list="{{ compList }}" as="cp" hint-placeholder-count="6">
+          <button onClick="{{ cp.pick }}" style="{{ cp.style }}">
+            <svg width="12" height="12" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5L14.5 8L8 14.5L1.5 8Z" fill="none" stroke="#111111" stroke-width="1.4"></path></svg>
+            <span>{{ cp.name }}</span>
+            <span style="{{ cp.dot }}" title="{{ cp.figmaText }}"></span>
+            <span style="margin-left: auto; font-size: 11px; color: #6B6B6B">{{ cp.stories }}</span>
+          </button>
+        </sc-for>
+        <div style="padding: 10px 8px; font-size: 11px; color: #6B6B6B; line-height: 1.6">
+          <div style="display: flex; align-items: center; gap: 6px"><span style="width: 6px; height: 6px; border-radius: 50%; background: #16A34A"></span>Matches Figma</div>
+          <div style="display: flex; align-items: center; gap: 6px"><span style="width: 6px; height: 6px; border-radius: 50%; background: #D97706"></span>Differs from Figma</div>
+          <div style="display: flex; align-items: center; gap: 6px"><span style="width: 6px; height: 6px; border-radius: 50%; background: #A1A1AA"></span>Not in Figma</div>
+        </div>
+      </div>
+    </sc-if>
+
+    <!-- Chat -->
+    <sc-if value="{{ leftIs.chat }}" hint-placeholder-val="{{ false }}">
+      <div style="padding: 8px 10px; border-bottom: 1px solid #EDEDED; display: flex; flex-direction: column; gap: 6px">
+        <div style="display: flex; gap: 6px; align-items: center">
+          <select aria-label="Chat session" value="{{ chatIdx }}" onChange="{{ pickChat }}" style="flex: 1; min-width: 0; height: 28px; border: 1px solid #E6E6E6; border-radius: 6px; background: #F7F7F8; font-size: 12px; font-weight: 600; padding: 0 6px">
+            <sc-for list="{{ chatOptions }}" as="co" hint-placeholder-count="2"><option value="{{ co.value }}">{{ co.name }}</option></sc-for>
+          </select>
+          <button onClick="{{ newChat }}" aria-label="New chat" title="New chat" style="width: 28px; height: 28px; border: 1px solid #E6E6E6; background: #fff; border-radius: 6px; cursor: pointer; font-size: 15px; line-height: 1">+</button>
+        </div>
+        <button onClick="{{ togClaude }}" style="align-self: flex-start; border: 0; background: transparent; padding: 0; font-size: 11px; color: #6B6B6B; cursor: pointer">{{ srcShort }} · {{ modelName }} · {{ effort }} · {{ modeShort }}</button>
+      </div>
+      <div style="flex: 1; min-height: 0; overflow: auto; padding: 12px 10px; display: flex; flex-direction: column-reverse; gap: 12px">
+        <sc-for list="{{ chatMsgs }}" as="m" hint-placeholder-count="2">
+          <sc-if value="{{ m.isUser }}" hint-placeholder-val="{{ true }}">
+            <div style="align-self: flex-end; max-width: 88%; background: #EFEFEF; padding: 8px 10px; border-radius: 10px 10px 2px 10px; line-height: 1.45">{{ m.text }}</div>
+          </sc-if>
+          <sc-if value="{{ m.isClaude }}" hint-placeholder-val="{{ false }}">
+            <div style="display: flex; gap: 8px; align-items: flex-start">
+              <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" style="flex: none; margin-top: 2px"><path d="M8 1.5L9.4 6.6L14.5 8L9.4 9.4L8 14.5L6.6 9.4L1.5 8L6.6 6.6Z" fill="#111111"></path></svg>
+              <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; line-height: 1.45">
+                <div style="font-size: 10.5px; color: #6B6B6B">Claude · {{ m.meta }}</div>
+                <div>{{ m.text }}</div>
+                <sc-if value="{{ m.showSteps }}" hint-placeholder-val="{{ false }}">
+                  <div style="display: flex; flex-direction: column; gap: 2px">
+                    <sc-for list="{{ aiSteps }}" as="st" hint-placeholder-count="4">
+                      <div style="display: flex; align-items: center; gap: 6px; min-height: 20px; font-size: 11.5px">
+                        <span style="{{ st.dot }}"></span><span style="{{ st.style }}">{{ st.label }}</span>
+                      </div>
+                    </sc-for>
+                  </div>
+                </sc-if>
+                <sc-if value="{{ m.isPlan }}" hint-placeholder-val="{{ false }}">
+                  <div style="border: 1px solid #E5E5E5; background: #FAFAFA; border-radius: 8px; padding: 8px 10px">
+                    <div style="font-size: 10px; font-weight: 600; color: #111111; margin-bottom: 4px">PLAN</div>
+                    <sc-for list="{{ m.plan }}" as="pl" hint-placeholder-count="3"><div style="font-size: 11.5px; padding: 2px 0">{{ pl }}</div></sc-for>
+                    <div style="display: flex; gap: 6px; margin-top: 8px">
+                      <button onClick="{{ approvePlan }}" style="height: 26px; padding: 0 10px; border: 0; background: #111111; color: #fff; border-radius: 6px; font-size: 11px; font-weight: 600; cursor: pointer">Approve and edit</button>
+                      <button onClick="{{ discardAI }}" style="height: 26px; padding: 0 10px; border: 1px solid #E0E0E0; background: #fff; border-radius: 6px; font-size: 11px; cursor: pointer">Cancel</button>
+                    </div>
+                  </div>
+                </sc-if>
+                <sc-if value="{{ m.hasFiles }}" hint-placeholder-val="{{ false }}">
+                  <div style="display: flex; flex-wrap: wrap; gap: 4px">
+                    <sc-for list="{{ m.files }}" as="f" hint-placeholder-count="2"><span style="font-family: 'JetBrains Mono', monospace; font-size: 10.5px; background: #F4F4F5; border: 1px solid #E4E4E7; padding: 1px 6px; border-radius: 4px">{{ f }}</span></sc-for>
+                  </div>
+                </sc-if>
+                <sc-if value="{{ m.isReview }}" hint-placeholder-val="{{ false }}">
+                  <div style="display: flex; gap: 6px; flex-wrap: wrap">
+                    <button onClick="{{ keepAI }}" style="height: 26px; padding: 0 10px; border: 0; background: #111111; color: #fff; border-radius: 6px; font-size: 11px; font-weight: 600; cursor: pointer">Keep</button>
+                    <button onClick="{{ discardAI }}" style="height: 26px; padding: 0 10px; border: 1px solid #E0E0E0; background: #fff; border-radius: 6px; font-size: 11px; cursor: pointer">Discard</button>
+                    <button onClick="{{ toggleBefore }}" style="height: 26px; padding: 0 10px; border: 1px solid #E0E0E0; background: #fff; border-radius: 6px; font-size: 11px; cursor: pointer">{{ beforeLabel }}</button>
+                  </div>
+                </sc-if>
+                <sc-if value="{{ m.isKept }}" hint-placeholder-val="{{ false }}">
+                  <div style="display: flex; align-items: center; gap: 8px; font-size: 11px; color: #047857">Kept · checkpoint saved
+                    <button onClick="{{ m.rewind }}" style="height: 22px; padding: 0 8px; border: 1px solid #E0E0E0; background: #fff; border-radius: 5px; font-size: 11px; color: #1E1E1E; cursor: pointer">Rewind</button>
+                  </div>
+                </sc-if>
+                <sc-if value="{{ m.isDiscarded }}" hint-placeholder-val="{{ false }}"><div style="font-size: 11px; color: #6B6B6B">Discarded. Nothing changed.</div></sc-if>
+                <sc-if value="{{ m.isRewound }}" hint-placeholder-val="{{ false }}"><div style="font-size: 11px; color: #6B6B6B">Rewound to before this change.</div></sc-if>
+              </div>
+            </div>
+          </sc-if>
+        </sc-for>
+        <sc-if value="{{ chatEmpty }}" hint-placeholder-val="{{ false }}">
+          <div style="color: #6B6B6B; line-height: 1.55; font-size: 11.5px">
+            <div style="font-weight: 600; color: #1E1E1E; margin-bottom: 4px">Ask Claude about your design</div>
+            Select something on the canvas, then ask. In this prototype Claude can make the cards denser, add an empty state, switch to dark mode, make the brand teal, round the buttons, add a Button variant, write stories, or turn a frame you drew into code.
+          </div>
+        </sc-if>
+      </div>
+      <form onSubmit="{{ submitChat }}" style="border-top: 1px solid #EDEDED; padding: 8px 10px; display: flex; flex-direction: column; gap: 6px">
+        <div style="display: flex; gap: 4px; flex-wrap: wrap">
+          <span style="font-size: 10.5px; font-weight: 500; color: #111111; background: #EFEFEF; padding: 2px 6px; border-radius: 4px">{{ ctxLabel }}</span>
+        </div>
+        <div style="display: flex; gap: 6px; align-items: center">
+          <input aria-label="Message Claude" value="{{ chatInput }}" onInput="{{ typeChat }}" placeholder="Ask Claude…" style="flex: 1; min-width: 0; height: 32px; border: 1px solid #E0E0E0; border-radius: 8px; padding: 0 10px; font-size: 12px">
+          <button type="submit" aria-label="Send" style="width: 32px; height: 32px; flex: none; border: 0; border-radius: 8px; background: #111111; color: #fff; display: grid; place-items: center; cursor: pointer">
+            <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 13V3M3.5 7.5L8 3L12.5 7.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+          </button>
+        </div>
+        <div style="display: flex; gap: 4px">
+          <select aria-label="Model" value="{{ model }}" onChange="{{ setModel }}" style="flex: 1; min-width: 0; height: 24px; border: 1px solid #E6E6E6; border-radius: 5px; background: #F7F7F8; font-size: 11px">
+            <sc-for list="{{ modelList }}" as="mo" hint-placeholder-count="3"><option value="{{ mo.id }}">{{ mo.name }}</option></sc-for>
+          </select>
+          <select aria-label="Effort" value="{{ effort }}" onChange="{{ setEffort }}" style="flex: 1; min-width: 0; height: 24px; border: 1px solid #E6E6E6; border-radius: 5px; background: #F7F7F8; font-size: 11px">
+            <sc-for list="{{ effortList }}" as="ef" hint-placeholder-count="5"><option value="{{ ef }}">{{ ef }}</option></sc-for>
+          </select>
+          <select aria-label="Mode" value="{{ mode }}" onChange="{{ setMode }}" style="flex: 1; min-width: 0; height: 24px; border: 1px solid #E6E6E6; border-radius: 5px; background: #F7F7F8; font-size: 11px">
+            <sc-for list="{{ modeList }}" as="md" hint-placeholder-count="3"><option value="{{ md.id }}">{{ md.short }}</option></sc-for>
+          </select>
+        </div>
+      </form>
+    </sc-if>
+  </div>
+
+  <!-- ===== Canvas view ===== -->
+  <sc-if value="{{ isCanvas }}" hint-placeholder-val="{{ true }}">
+    <div onMouseDown="{{ canvasDown }}" onMouseMove="{{ canvasMove }}" onMouseUp="{{ canvasUp }}" onMouseLeave="{{ canvasLeave }}" data-bg="1" style="{{ canvasStyle }}">
+      <div data-bg="1" style="{{ worldStyle }}">
+
+        <!-- Live frame -->
+        <div style="{{ liveFramePos }}">
+          <div onClick="{{ pickFrame }}" style="display: flex; align-items: center; gap: 6px; margin-bottom: 6px; font-size: 11px; color: #6B6B6B; cursor: default">
+            <span style="width: 6px; height: 6px; border-radius: 50%; background: #16A34A"></span>
+            <span style="{{ frameLabelStyle }}">{{ route.title }}</span><span>· live from {{ route.path }} · {{ frameW }}px</span>
+          </div>
+          <div onClick="{{ pickFrame }}" style="{{ liveFrameStyle }}">
+            <div style="{{ live.header }}">
+              <span style="font-weight: 600; font-size: 13px">Acme</span>
+              <span style="{{ live.avatar }}"></span>
+            </div>
+            <div style="padding: 20px 24px 0">
+              <div style="font-size: 20px; font-weight: 600; margin-bottom: 4px">{{ route.title }}</div>
+              <div style="{{ live.sub }}">{{ route.sub }}</div>
+              <div style="{{ cardListStyle }}">
+                <sc-for list="{{ cards }}" as="c" hint-placeholder-count="3">
+                  <div onClick="{{ c.pick }}" style="{{ c.style }}">
+                    <div style="min-width: 0">
+                      <div style="{{ c.titleStyle }}">{{ c.t }}</div>
+                      <div style="{{ c.descStyle }}">{{ c.d }}</div>
+                    </div>
+                    <span style="{{ c.btnStyle }}">Edit</span>
+                    <sc-if value="{{ c.selected }}" hint-placeholder-val="{{ false }}">
+                      <span style="position: absolute; left: 50%; bottom: -22px; transform: translateX(-50%); background: #111111; color: #fff; font-size: 10px; font-weight: 500; padding: 2px 6px; border-radius: 3px; white-space: nowrap; z-index: 2">{{ c.dims }}</span>
+                    </sc-if>
+                    <sc-if value="{{ c.editing }}" hint-placeholder-val="{{ false }}">
+                      <span style="position: absolute; inset: 0; border-radius: 8px; background: rgba(17,17,17,0.10); display: flex; align-items: flex-start; justify-content: flex-end; padding: 6px">
+                        <span style="background: #111111; color: #fff; font-size: 10px; font-weight: 600; padding: 2px 6px; border-radius: 4px">Claude is editing</span>
+                      </span>
+                    </sc-if>
+                  </div>
+                </sc-for>
+                <sc-if value="{{ showEmpty }}" hint-placeholder-val="{{ false }}">
+                  <div style="{{ live.empty }}">
+                    <div style="font-weight: 600; font-size: 13px">No notifications yet</div>
+                    <div style="{{ live.emptySub }}">We'll let you know when something needs your attention.</div>
+                    <span style="{{ live.emptyBtn }}">Turn on email updates</span>
+                  </div>
+                </sc-if>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Design frame from Figma -->
+        <sc-if value="{{ figma }}" hint-placeholder-val="{{ false }}">
+          <div style="{{ designFramePos }}">
+            <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 6px; font-size: 11px; color: #6B6B6B">
+              <span style="width: 6px; height: 6px; border-radius: 2px; background: #111111"></span>
+              <span style="font-weight: 500; color: #1E1E1E">Onboarding</span><span>· design frame from Figma</span>
+            </div>
+            <div style="position: relative; background: #fff; border-radius: 2px; box-shadow: 0 0 0 1px rgba(0,0,0,0.06), 0 1px 3px rgba(0,0,0,0.06); padding: 28px 24px 24px">
+              <div style="font-size: 20px; font-weight: 600; text-align: center">Choose your plan</div>
+              <div style="font-size: 12px; color: #6B6B6B; text-align: center; margin: 4px 0 20px">You can change it any time</div>
+              <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px">
+                <div style="border: 1px solid #E4E4E7; border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 8px">
+                  <div style="font-weight: 600; font-size: 14px">Starter</div>
+                  <div style="font-size: 22px; font-weight: 600">€0</div>
+                  <div style="font-size: 12px; color: #6B6B6B">For trying things out</div>
+                  <span style="{{ planBtn }}">Choose Starter</span>
+                </div>
+                <div style="{{ proCard }}">
+                  <div style="display: flex; align-items: center; justify-content: space-between">
+                    <span style="font-weight: 600; font-size: 14px">Pro</span>
+                    <span onClick="{{ pickBadge }}" style="{{ badgeStyle }}">Popular</span>
+                  </div>
+                  <div style="font-size: 22px; font-weight: 600">€12</div>
+                  <div style="font-size: 12px; color: #6B6B6B">For growing teams</div>
+                  <span style="{{ planBtnPrimary }}">Choose Pro</span>
+                </div>
+              </div>
+              <div style="{{ badgeTagStyle }}">{{ badgeTag }}</div>
+            </div>
+          </div>
+        </sc-if>
+        <sc-if value="{{ noFigma }}" hint-placeholder-val="{{ true }}">
+          <div style="{{ importSlotStyle }}">
+            <svg width="28" height="28" viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 9.5V13.5H13.5V9.5M8 2.5V10M5 7L8 10L11 7" fill="none" stroke="#111111" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+            <div style="font-size: 13px; font-weight: 600; color: #1E1E1E">Bring in a Figma page</div>
+            <div style="max-width: 260px; line-height: 1.5">Its frames land here as editable design frames, next to your live screens.</div>
+            <button onClick="{{ openImport }}" style="height: 30px; padding: 0 12px; border: 0; background: #111111; color: #fff; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer">Import from Figma</button>
+          </div>
+        </sc-if>
+
+        <!-- Things you draw -->
+        <sc-for list="{{ items }}" as="it" hint-placeholder-count="0">
+          <div onMouseDown="{{ it.down }}" onClick="{{ swallow }}" style="{{ it.style }}">
+            <sc-if value="{{ it.isFrame }}" hint-placeholder-val="{{ false }}"><span style="position: absolute; left: 0; top: -18px; font-size: 11px; color: #6B6B6B; white-space: nowrap">{{ it.name }}</span></sc-if>
+            <sc-if value="{{ it.isText }}" hint-placeholder-val="{{ false }}"><span>{{ it.text }}</span></sc-if>
+            <sc-if value="{{ it.isNote }}" hint-placeholder-val="{{ false }}"><span>{{ it.num }}</span></sc-if>
+            <sc-if value="{{ it.showBubble }}" hint-placeholder-val="{{ false }}"><span style="position: absolute; left: 32px; top: 0; width: 180px; background: #fff; color: #1E1E1E; border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,0.14); padding: 8px 10px; font-size: 12px; font-weight: 400; line-height: 1.4; text-align: left">{{ it.text }}</span></sc-if>
+            <sc-if value="{{ it.isCode }}" hint-placeholder-val="{{ false }}"><span style="position: absolute; right: 0; top: -18px; font-size: 10px; font-weight: 600; color: #065F46; background: #D1FAE5; padding: 1px 5px; border-radius: 4px">In code</span></sc-if>
+          </div>
+        </sc-for>
+      </div>
+
+      <!-- Toolbar -->
+      <div onMouseDown="{{ swallow }}" onMouseUp="{{ swallow }}" style="position: absolute; left: 50%; bottom: 20px; transform: translateX(-50%); display: flex; align-items: center; gap: 2px; padding: 4px; background: #fff; border-radius: 12px; box-shadow: 0 4px 16px rgba(0,0,0,0.12), 0 0 0 1px rgba(0,0,0,0.06)">
+        <button onClick="{{ tools.move.pick }}" aria-label="Move" title="Move" style="{{ tools.move.style }}"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 2.5L12.5 7.5L8.3 8.6L6.5 12.8Z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"></path></svg></button>
+        <button onClick="{{ tools.frame.pick }}" aria-label="Frame" title="Frame: click the canvas to add one" style="{{ tools.frame.style }}"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M5 1.5V14.5M11 1.5V14.5M1.5 5H14.5M1.5 11H14.5" fill="none" stroke="currentColor" stroke-width="1.3"></path></svg></button>
+        <button onClick="{{ tools.rect.pick }}" aria-label="Shape" title="Shape: click the canvas to add one" style="{{ tools.rect.style }}"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><rect x="2.5" y="2.5" width="11" height="11" rx="1" fill="none" stroke="currentColor" stroke-width="1.3"></rect></svg></button>
+        <button onClick="{{ tools.text.pick }}" aria-label="Text" title="Text: click the canvas to add some" style="{{ tools.text.style }}"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3.5H13M8 3.5V13" fill="none" stroke="currentColor" stroke-width="1.4"></path></svg></button>
+        <button onClick="{{ tools.note.pick }}" aria-label="Comment" title="Comment: click the canvas to pin one" style="{{ tools.note.style }}"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 13.5V8A5.5 5.5 0 1 1 8 13.5Z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"></path></svg></button>
+        <span style="width: 1px; height: 20px; background: #E6E6E6; margin: 0 4px"></span>
+        <button onClick="{{ openAI }}" aria-label="Ask AI" style="{{ aiBtnStyle }}">
+          <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5L9.4 6.6L14.5 8L9.4 9.4L8 14.5L6.6 9.4L1.5 8L6.6 6.6Z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"></path></svg>
+          <span>Ask AI</span>
+        </button>
+      </div>
+
+      <!-- Zoom -->
+      <div onMouseDown="{{ swallow }}" onMouseUp="{{ swallow }}" style="position: absolute; right: 12px; bottom: 20px; display: flex; align-items: center; gap: 2px; padding: 3px; background: #fff; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1), 0 0 0 1px rgba(0,0,0,0.06)">
+        <button onClick="{{ zoomOut }}" aria-label="Zoom out" style="width: 26px; height: 26px; border: 0; background: transparent; border-radius: 5px; cursor: pointer; font-size: 15px">−</button>
+        <button onClick="{{ zoomReset }}" aria-label="Reset zoom and position" style="min-width: 48px; height: 26px; border: 0; background: transparent; border-radius: 5px; cursor: pointer; font-size: 11px; font-weight: 500">{{ zoomLabel }}</button>
+        <button onClick="{{ zoomIn }}" aria-label="Zoom in" style="width: 26px; height: 26px; border: 0; background: transparent; border-radius: 5px; cursor: pointer; font-size: 15px">+</button>
+      </div>
+      <sc-if value="{{ toolHint }}" hint-placeholder-val="{{ false }}">
+        <div style="position: absolute; left: 50%; top: 12px; transform: translateX(-50%); background: #1E1E1E; color: #fff; font-size: 11px; padding: 5px 10px; border-radius: 6px">{{ toolHintText }}</div>
+      </sc-if>
+    </div>
+
+    <!-- Right panel: canvas -->
+    <div class="side" style="width: 268px; flex: none; background: #FFFFFF; border-left: 1px solid #E6E6E6; display: flex; flex-direction: column; min-height: 0">
+      <div style="display: flex; gap: 2px; padding: 8px 8px 6px; border-bottom: 1px solid #EDEDED">
+        <button onClick="{{ tabDesign }}" style="{{ tabs.design }}">Design</button>
+        <button onClick="{{ tabTokens }}" style="{{ tabs.tokens }}">Tokens</button>
+        <button onClick="{{ tabCode }}" style="{{ tabs.code }}">Code</button>
+      </div>
+      <div style="flex: 1; overflow: auto">
+
+        <!-- Card -->
+        <sc-if value="{{ showCardDesign }}" hint-placeholder-val="{{ true }}">
+          <div style="padding: 12px; border-bottom: 1px solid #EDEDED">
+            <div style="display: flex; align-items: center; gap: 6px">
+              <svg width="12" height="12" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5L14.5 8L8 14.5L1.5 8Z" fill="none" stroke="#111111" stroke-width="1.5"></path></svg>
+              <span style="font-weight: 600">Card · {{ selCardName }}</span>
+              <button onClick="{{ openCardComp }}" style="margin-left: auto; height: 22px; padding: 0 6px; border: 0; background: #EFEFEF; color: #111111; border-radius: 4px; font-size: 10.5px; font-weight: 600; cursor: pointer">Open component</button>
+            </div>
+            <div style="font-family: 'JetBrains Mono', monospace; font-size: 10.5px; color: #6B6B6B; margin-top: 4px">{{ route.file }} → Card.tsx</div>
+          </div>
+          <div style="padding: 12px; border-bottom: 1px solid #EDEDED; display: flex; flex-direction: column; gap: 8px">
+            <div style="font-weight: 600; font-size: 11px">Change applies to</div>
+            <div role="group" aria-label="Change applies to" style="display: flex; background: #F2F2F3; border-radius: 6px; padding: 2px">
+              <button onClick="{{ scopeOne }}" style="{{ scopes.one }}">This card</button>
+              <button onClick="{{ scopeAll }}" style="{{ scopes.all }}">All cards</button>
+            </div>
+            <div style="font-size: 11px; color: #6B6B6B; line-height: 1.5">{{ scopeNote }}</div>
+          </div>
+          <div style="padding: 12px; border-bottom: 1px solid #EDEDED; display: grid; grid-template-columns: 76px 1fr; align-items: center; gap: 6px 8px">
+            <label for="p-variant" style="color: #6B6B6B">variant</label>
+            <select id="p-variant" value="{{ selCardVar }}" onChange="{{ setCardVar }}" style="height: 26px; border: 1px solid #E6E6E6; border-radius: 5px; background: #F7F7F8; font-size: 12px; padding: 0 6px"><option value="outlined">outlined</option><option value="elevated">elevated</option><option value="ghost">ghost</option></select>
+            <label for="p-size" style="color: #6B6B6B">size</label>
+            <select id="p-size" value="{{ selCardSize }}" onChange="{{ setCardSize }}" style="height: 26px; border: 1px solid #E6E6E6; border-radius: 5px; background: #F7F7F8; font-size: 12px; padding: 0 6px"><option value="sm">sm</option><option value="md">md</option><option value="lg">lg</option></select>
+            <label for="p-pad" style="color: #6B6B6B">padding</label>
+            <select id="p-pad" value="{{ selCardPad }}" onChange="{{ setCardPad }}" style="height: 26px; border: 1px solid #E6E6E6; border-radius: 5px; background: #F7F7F8; font-size: 12px; padding: 0 6px"><option value="space.2">space.2 · 8</option><option value="space.3">space.3 · 12</option><option value="space.4">space.4 · 16</option><option value="space.5">space.5 · 20</option><option value="space.6">space.6 · 24</option></select>
+            <label for="p-gap" style="color: #6B6B6B">list gap</label>
+            <select id="p-gap" value="{{ gapTok }}" onChange="{{ setGap }}" style="height: 26px; border: 1px solid #E6E6E6; border-radius: 5px; background: #F7F7F8; font-size: 12px; padding: 0 6px"><option value="space.2">space.2 · 8</option><option value="space.3">space.3 · 12</option><option value="space.4">space.4 · 16</option><option value="space.5">space.5 · 20</option></select>
+          </div>
+          <div style="padding: 12px">
+            <button onClick="{{ openAI }}" style="width: 100%; height: 32px; border: 1px solid #D4D4D4; background: #F7F7F7; color: #111111; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer">Ask AI about this card</button>
+          </div>
+        </sc-if>
+
+        <!-- Frame -->
+        <sc-if value="{{ showFrameDesign }}" hint-placeholder-val="{{ false }}">
+          <div style="padding: 12px; border-bottom: 1px solid #EDEDED">
+            <div style="font-weight: 600">{{ route.title }} frame</div>
+            <div style="font-family: 'JetBrains Mono', monospace; font-size: 10.5px; color: #6B6B6B; margin-top: 4px">{{ route.file }}</div>
+          </div>
+          <div style="padding: 12px; border-bottom: 1px solid #EDEDED; display: grid; grid-template-columns: 76px 1fr; align-items: center; gap: 6px 8px">
+            <label for="f-device" style="color: #6B6B6B">Device</label>
+            <select id="f-device" value="{{ frameW }}" onChange="{{ setFrameW }}" style="height: 26px; border: 1px solid #E6E6E6; border-radius: 5px; background: #F7F7F8; font-size: 12px; padding: 0 6px"><option value="360">Phone · 360</option><option value="400">Large phone · 400</option><option value="520">Small tablet · 520</option><option value="680">Tablet · 680</option></select>
+            <span style="color: #6B6B6B">Theme</span>
+            <div role="group" aria-label="Theme" style="display: flex; background: #F2F2F3; border-radius: 6px; padding: 2px">
+              <button onClick="{{ setLight }}" style="{{ liveThemeTabs.light }}">Light</button>
+              <button onClick="{{ setDark }}" style="{{ liveThemeTabs.dark }}">Dark</button>
+            </div>
+            <span style="color: #6B6B6B">Route</span><span>{{ route.path }}</span>
+          </div>
+          <div style="padding: 12px; color: #6B6B6B; line-height: 1.5">This frame is your running app. Click a card inside it to edit it.</div>
+        </sc-if>
+
+        <!-- Drawn item -->
+        <sc-if value="{{ showItemDesign }}" hint-placeholder-val="{{ false }}">
+          <div style="padding: 12px; border-bottom: 1px solid #EDEDED; display: flex; align-items: center; gap: 6px">
+            <span style="font-weight: 600">{{ selItem.name }}</span>
+            <span style="{{ selItem.tagStyle }}">{{ selItem.tag }}</span>
+          </div>
+          <div style="padding: 12px; border-bottom: 1px solid #EDEDED; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px">
+            <label style="display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 8px; background: #F7F7F8; border-radius: 5px"><span style="color: #6B6B6B">X</span><input type="number" value="{{ selItem.x }}" onChange="{{ setItemX }}" style="width: 100%; min-width: 0; border: 0; background: transparent; font-size: 12px"></label>
+            <label style="display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 8px; background: #F7F7F8; border-radius: 5px"><span style="color: #6B6B6B">Y</span><input type="number" value="{{ selItem.y }}" onChange="{{ setItemY }}" style="width: 100%; min-width: 0; border: 0; background: transparent; font-size: 12px"></label>
+            <sc-if value="{{ selItem.sized }}" hint-placeholder-val="{{ true }}">
+              <label style="display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 8px; background: #F7F7F8; border-radius: 5px"><span style="color: #6B6B6B">W</span><input type="number" value="{{ selItem.w }}" onChange="{{ setItemW }}" style="width: 100%; min-width: 0; border: 0; background: transparent; font-size: 12px"></label>
+              <label style="display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 8px; background: #F7F7F8; border-radius: 5px"><span style="color: #6B6B6B">H</span><input type="number" value="{{ selItem.h }}" onChange="{{ setItemH }}" style="width: 100%; min-width: 0; border: 0; background: transparent; font-size: 12px"></label>
+            </sc-if>
+          </div>
+          <div style="padding: 12px; border-bottom: 1px solid #EDEDED; display: flex; flex-direction: column; gap: 8px">
+            <sc-if value="{{ selItem.hasFill }}" hint-placeholder-val="{{ true }}">
+              <label style="display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 8px; background: #F7F7F8; border-radius: 5px"><input type="color" value="{{ selItem.fill }}" onChange="{{ setItemFill }}" aria-label="Fill" style="width: 20px; height: 20px; border: 0; padding: 0; background: transparent"><span>Fill · {{ selItem.fill }}</span></label>
+            </sc-if>
+            <sc-if value="{{ selItem.hasText }}" hint-placeholder-val="{{ false }}">
+              <label style="display: flex; flex-direction: column; gap: 4px"><span style="color: #6B6B6B; font-size: 11px">{{ selItem.textLabel }}</span><input value="{{ selItem.text }}" onInput="{{ setItemText }}" style="height: 30px; border: 1px solid #E0E0E0; border-radius: 6px; padding: 0 8px; font-size: 12px"></label>
+            </sc-if>
+          </div>
+          <div style="padding: 12px; display: flex; flex-direction: column; gap: 6px">
+            <sc-if value="{{ selItem.canCode }}" hint-placeholder-val="{{ true }}">
+              <button onClick="{{ itemToCode }}" style="height: 32px; border: 0; background: #111111; color: #fff; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer">Turn into code with Claude</button>
+            </sc-if>
+            <button onClick="{{ deleteItem }}" style="height: 30px; border: 1px solid #E0E0E0; background: #fff; border-radius: 6px; font-size: 12px; color: #B91C1C; cursor: pointer">Delete</button>
+          </div>
+        </sc-if>
+
+        <!-- Badge -->
+        <sc-if value="{{ showBadgeDesign }}" hint-placeholder-val="{{ false }}">
+          <div style="padding: 12px; border-bottom: 1px solid #EDEDED">
+            <div style="display: flex; align-items: center; gap: 6px">
+              <svg width="12" height="12" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5L14.5 8L8 14.5L1.5 8Z" fill="none" stroke="#111111" stroke-width="1.5"></path></svg>
+              <span style="font-weight: 600">PlanBadge</span>
+              <span style="{{ badgePanelPill }}">{{ badgePanelPillText }}</span>
+            </div>
+            <div style="font-family: 'JetBrains Mono', monospace; font-size: 10.5px; color: #6B6B6B; margin-top: 4px">{{ badgeSource }}</div>
+          </div>
+          <div style="padding: 12px; border-bottom: 1px solid #EDEDED; display: grid; grid-template-columns: 76px 1fr; align-items: center; gap: 6px 8px">
+            <span style="color: #6B6B6B">Variant</span><span style="height: 26px; display: flex; align-items: center; padding: 0 8px; background: #F7F7F8; border-radius: 5px">Popular</span>
+            <span style="color: #6B6B6B">Size</span><span style="height: 26px; display: flex; align-items: center; padding: 0 8px; background: #F7F7F8; border-radius: 5px">sm</span>
+          </div>
+          <sc-if value="{{ notBuilt }}" hint-placeholder-val="{{ true }}">
+            <div style="padding: 12px">
+              <div style="background: #FFFBEB; border: 1px solid #FDE68A; border-radius: 8px; padding: 10px; line-height: 1.5; margin-bottom: 10px">This component isn't in your repo yet. Claude can build it from the Figma component set, with every variant and a story, using your tokens.</div>
+              <button onClick="{{ openBuild }}" style="width: 100%; height: 32px; border: 0; background: #111111; color: #fff; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer">Build in code</button>
+            </div>
+          </sc-if>
+          <sc-if value="{{ built }}" hint-placeholder-val="{{ false }}">
+            <div style="padding: 12px; display: flex; flex-direction: column; gap: 8px; line-height: 1.5">
+              <div style="color: #047857; font-weight: 600">Linked to code</div>
+              <div style="color: #6B6B6B">6 variants. Every PlanBadge on imported pages now renders the real component.</div>
+              <button onClick="{{ openBadgeComp }}" style="height: 30px; border: 1px solid #E0E0E0; background: #fff; border-radius: 6px; font-size: 12px; cursor: pointer">Open in Components</button>
+            </div>
+          </sc-if>
+        </sc-if>
+
+        <!-- Nothing selected -->
+        <sc-if value="{{ showPageDesign }}" hint-placeholder-val="{{ false }}">
+          <div style="padding: 12px; display: flex; flex-direction: column; gap: 8px; line-height: 1.5">
+            <div style="font-weight: 600; font-size: 11px">Nothing selected</div>
+            <div style="color: #6B6B6B">Click a card or a frame name. Pick Frame, Shape, Text or Comment in the toolbar, then click the canvas to add one. Drag empty canvas to move around.</div>
+            <div style="font-weight: 600; font-size: 11px; margin-top: 6px">Repo</div>
+            <div style="color: #6B6B6B">~/code/{{ repoName }} · {{ devText }}</div>
+            <div style="font-weight: 600; font-size: 11px; margin-top: 6px">Figma</div>
+            <div style="color: #6B6B6B">{{ figmaStatus }}</div>
+          </div>
+        </sc-if>
+
+        <!-- Tokens -->
+        <sc-if value="{{ showTokens }}" hint-placeholder-val="{{ false }}">
+          <div style="padding: 12px; display: flex; flex-direction: column; gap: 8px">
+            <div style="display: flex; align-items: center; justify-content: space-between">
+              <span style="font-weight: 600; font-size: 11px">tokens.json</span>
+              <div role="group" aria-label="Mode" style="display: flex; background: #F2F2F3; border-radius: 6px; padding: 2px">
+                <button onClick="{{ setLight }}" style="{{ liveThemeTabs.light }}">Light</button>
+                <button onClick="{{ setDark }}" style="{{ liveThemeTabs.dark }}">Dark</button>
+              </div>
+            </div>
+            <label style="display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 8px; background: #F7F7F8; border-radius: 5px">
+              <input type="color" value="{{ brand }}" onChange="{{ setBrand }}" aria-label="color.brand.500" style="width: 20px; height: 20px; border: 0; padding: 0; background: transparent">
+              <span style="font-family: 'JetBrains Mono', monospace; font-size: 11px">color.brand.500</span>
+              <span style="margin-left: auto; color: #6B6B6B; font-size: 11px">{{ brand }}</span>
+            </label>
+            <sc-for list="{{ tokens }}" as="tk" hint-placeholder-count="5">
+              <div style="display: flex; align-items: center; gap: 8px; height: 24px; padding: 0 8px">
+                <span style="{{ tk.sw }}"></span>
+                <span style="font-family: 'JetBrains Mono', monospace; font-size: 11px">{{ tk.name }}</span>
+                <span style="margin-left: auto; color: #6B6B6B; font-size: 11px">{{ tk.val }}</span>
+              </div>
+            </sc-for>
+            <div style="font-size: 11px; color: #6B6B6B; line-height: 1.5">Edit the brand colour to see every live frame and component follow.</div>
+            <div style="{{ syncBox }}">{{ syncText }}</div>
+          </div>
+        </sc-if>
+
+        <!-- Code -->
+        <sc-if value="{{ showCode }}" hint-placeholder-val="{{ false }}">
+          <div style="padding: 12px; display: flex; flex-direction: column; gap: 8px">
+            <div style="font-family: 'JetBrains Mono', monospace; font-size: 10.5px; color: #6B6B6B">{{ codeFile }}</div>
+            <pre style="margin: 0; padding: 10px; background: #1E1E1E; color: #E5E5E5; border-radius: 8px; font-family: 'JetBrains Mono', monospace; font-size: 11px; line-height: 1.6; white-space: pre-wrap">{{ codeText }}</pre>
+            <div style="font-size: 11px; color: #6B6B6B">Updates as you edit. Read only.</div>
+          </div>
+        </sc-if>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- ===== Components view ===== -->
+  <sc-if value="{{ isComponents }}" hint-placeholder-val="{{ false }}">
+    <div style="flex: 1; min-width: 0; overflow: auto; background: #F0F0F2">
+      <div style="max-width: 880px; margin: 0 auto; padding: 24px 24px 140px; display: flex; flex-direction: column; gap: 16px">
+        <div style="display: flex; align-items: flex-start; gap: 12px; flex-wrap: wrap">
+          <div style="display: flex; flex-direction: column; gap: 4px">
+            <div style="font-size: 22px; font-weight: 600">{{ comp.name }}</div>
+            <div style="font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #6B6B6B">{{ comp.file }} · {{ comp.storyFile }}</div>
+            <div style="color: #4B4B4B; max-width: 520px; line-height: 1.5">{{ comp.desc }}</div>
+          </div>
+          <div style="flex: 1"></div>
+          <div style="display: flex; gap: 8px; flex-wrap: wrap">
+            <div role="group" aria-label="Theme" style="display: flex; background: #E6E6E9; border-radius: 6px; padding: 2px">
+              <button onClick="{{ themeLight }}" style="{{ themeTabs.light }}">Light</button>
+              <button onClick="{{ themeDark }}" style="{{ themeTabs.dark }}">Dark</button>
+            </div>
+            <div role="group" aria-label="State" style="display: flex; background: #E6E6E9; border-radius: 6px; padding: 2px">
+              <sc-for list="{{ stateTabs }}" as="sx" hint-placeholder-count="4"><button onClick="{{ sx.pick }}" style="{{ sx.style }}">{{ sx.label }}</button></sc-for>
+            </div>
+          </div>
+        </div>
+
+        <div style="background: #fff; border-radius: 12px; box-shadow: 0 0 0 1px rgba(0,0,0,0.06); overflow: hidden">
+          <div style="display: flex; align-items: center; padding: 12px 16px; border-bottom: 1px solid #F0F0F0; flex-wrap: wrap; gap: 8px">
+            <span style="font-weight: 600">Variants</span>
+            <span style="color: #6B6B6B">{{ comp.axis }}</span>
+            <span style="margin-left: auto; font-size: 11px; color: #6B6B6B">Click a cell to preview it on the right</span>
+          </div>
+          <div style="{{ matrixBg }}">
+            <div style="{{ gridHead }}">
+              <span></span>
+              <sc-for list="{{ colHeads }}" as="ch" hint-placeholder-count="3"><span style="{{ headStyle }}">{{ ch }}</span></sc-for>
+            </div>
+            <sc-for list="{{ matrix }}" as="row" hint-placeholder-count="3">
+              <div style="{{ row.grid }}">
+                <span style="{{ headStyle }}">{{ row.label }}</span>
+                <sc-for list="{{ row.cells }}" as="cl" hint-placeholder-count="3">
+                  <button onClick="{{ cl.pick }}" aria-label="{{ cl.aria }}" style="{{ cl.wrap }}"><span style="{{ cl.style }}">{{ cl.text }}</span></button>
+                </sc-for>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px">
+          <div style="background: #fff; border-radius: 12px; box-shadow: 0 0 0 1px rgba(0,0,0,0.06); padding: 12px 16px">
+            <div style="font-weight: 600; margin-bottom: 8px">Stories</div>
+            <div style="display: flex; flex-wrap: wrap; gap: 6px">
+              <sc-for list="{{ storyChips }}" as="sc" hint-placeholder-count="5"><button onClick="{{ sc.pick }}" style="{{ sc.style }}">{{ sc.name }}</button></sc-for>
+            </div>
+          </div>
+          <div style="background: #fff; border-radius: 12px; box-shadow: 0 0 0 1px rgba(0,0,0,0.06); padding: 12px 16px">
+            <div style="font-weight: 600; margin-bottom: 8px">Used in</div>
+            <sc-for list="{{ comp.usage }}" as="u" hint-placeholder-count="3">
+              <div style="display: flex; height: 24px; align-items: center"><span>{{ u.where }}</span><span style="margin-left: auto; color: #6B6B6B">{{ u.count }}</span></div>
+            </sc-for>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="side" style="width: 284px; flex: none; background: #FFFFFF; border-left: 1px solid #E6E6E6; overflow: auto">
+      <div style="padding: 12px; border-bottom: 1px solid #EDEDED">
+        <div style="font-weight: 600; font-size: 11px; margin-bottom: 8px">Preview props</div>
+        <div style="display: grid; grid-template-columns: 72px 1fr; align-items: center; gap: 6px 8px">
+          <label for="cv-variant" style="color: #6B6B6B">variant</label>
+          <select id="cv-variant" value="{{ cvVariant }}" onChange="{{ setCvVariant }}" style="height: 26px; border: 1px solid #E6E6E6; border-radius: 5px; background: #F7F7F8; font-size: 12px; padding: 0 6px">
+            <sc-for list="{{ comp.variants }}" as="o" hint-placeholder-count="3"><option value="{{ o }}">{{ o }}</option></sc-for>
+          </select>
+          <label for="cv-size" style="color: #6B6B6B">size</label>
+          <select id="cv-size" value="{{ cvSize }}" onChange="{{ setCvSize }}" style="height: 26px; border: 1px solid #E6E6E6; border-radius: 5px; background: #F7F7F8; font-size: 12px; padding: 0 6px">
+            <sc-for list="{{ comp.sizes }}" as="o" hint-placeholder-count="3"><option value="{{ o }}">{{ o }}</option></sc-for>
+          </select>
+          <label for="cv-label" style="color: #6B6B6B">label</label>
+          <input id="cv-label" value="{{ cvLabel }}" onInput="{{ setCvLabel }}" style="height: 26px; border: 1px solid #E6E6E6; border-radius: 5px; background: #F7F7F8; font-size: 12px; padding: 0 6px; min-width: 0">
+        </div>
+        <div style="{{ previewBox }}"><span style="{{ previewStyle }}">{{ previewText }}</span></div>
+        <div style="font-size: 11px; color: #6B6B6B; line-height: 1.5">Preview only. These come from the story's args and don't change code.</div>
+      </div>
+      <div style="padding: 12px; border-bottom: 1px solid #EDEDED; display: flex; flex-direction: column; gap: 8px">
+        <div style="display: flex; align-items: center; gap: 6px">
+          <span style="font-weight: 600; font-size: 11px">Main component</span>
+          <span style="margin-left: auto; font-size: 10px; font-weight: 600; color: #111111; background: #EFEFEF; padding: 1px 6px; border-radius: 4px">Edits {{ comp.short }}</span>
+        </div>
+        <div style="display: grid; grid-template-columns: 72px 1fr; align-items: center; gap: 6px 8px">
+          <label for="mc-radius" style="color: #6B6B6B">Radius</label>
+          <select id="mc-radius" value="{{ radTok }}" onChange="{{ setRad }}" style="height: 26px; border: 1px solid #E6E6E6; border-radius: 5px; background: #F7F7F8; font-size: 12px; padding: 0 6px">
+            <option value="sm">radius.sm · 4</option><option value="md">radius.md · 6</option><option value="full">radius.full</option>
+          </select>
+          <label for="mc-weight" style="color: #6B6B6B">Weight</label>
+          <select id="mc-weight" value="{{ weightTok }}" onChange="{{ setWeight }}" style="height: 26px; border: 1px solid #E6E6E6; border-radius: 5px; background: #F7F7F8; font-size: 12px; padding: 0 6px">
+            <option value="500">font.weight.medium</option><option value="600">font.weight.semibold</option>
+          </select>
+        </div>
+        <div style="font-size: 11px; color: #6B6B6B; line-height: 1.5">{{ comp.impact }}</div>
+      </div>
+      <div style="padding: 12px; border-bottom: 1px solid #EDEDED; display: flex; flex-direction: column; gap: 8px; line-height: 1.5">
+        <div style="font-weight: 600; font-size: 11px">Figma</div>
+        <div style="{{ comp.figmaBox }}">{{ comp.figmaNote }}</div>
+        <sc-if value="{{ comp.drift }}" hint-placeholder-val="{{ false }}">
+          <div style="display: flex; gap: 6px">
+            <button onClick="{{ fixDrift }}" style="flex: 1; height: 28px; border: 0; background: #111111; color: #fff; border-radius: 6px; font-size: 11px; font-weight: 600; cursor: pointer">Match Figma in code</button>
+            <button onClick="{{ pushDrift }}" style="flex: 1; height: 28px; border: 1px solid #E0E0E0; background: #fff; border-radius: 6px; font-size: 11px; cursor: pointer">Update Figma</button>
+          </div>
+        </sc-if>
+      </div>
+      <div style="padding: 12px; display: flex; flex-direction: column; gap: 8px">
+        <div style="font-weight: 600; font-size: 11px">With Claude</div>
+        <button onClick="{{ compAI.variant }}" style="height: 30px; border: 1px solid #D4D4D4; background: #F7F7F7; color: #111111; border-radius: 6px; font-size: 12px; font-weight: 500; cursor: pointer; text-align: left; padding: 0 10px">Add an outline variant</button>
+        <button onClick="{{ compAI.stories }}" style="height: 30px; border: 1px solid #D4D4D4; background: #F7F7F7; color: #111111; border-radius: 6px; font-size: 12px; font-weight: 500; cursor: pointer; text-align: left; padding: 0 10px">Write missing stories</button>
+        <button onClick="{{ compAI.canvas }}" style="height: 30px; border: 1px solid #E0E0E0; background: #fff; border-radius: 6px; font-size: 12px; cursor: pointer">See it on the canvas</button>
+      </div>
+    </div>
+  </sc-if>
+</div>
+
+<!-- ===== Status bar ===== -->
+<div style="height: 26px; flex: none; display: flex; align-items: center; gap: 16px; padding: 0 12px; background: #FFFFFF; border-top: 1px solid #E6E6E6; font-size: 11px; color: #6B6B6B; white-space: nowrap; overflow: hidden">
+  <span style="display: flex; align-items: center; gap: 6px"><span style="{{ devDot }}"></span>~/code/{{ repoName }} · {{ devText }}</span>
+  <span style="display: flex; align-items: center; gap: 6px"><svg width="12" height="12" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5L9.4 6.6L14.5 8L9.4 9.4L8 14.5L6.6 9.4L1.5 8L6.6 6.6Z" fill="#111111"></path></svg>{{ claudeStatus }}</span>
+  <span>{{ changesText }}</span>
+  <span style="margin-left: auto">design/grace/{{ branchSlug }}</span>
+</div>
+
+<!-- ===== Floating AI (quick ask + review) ===== -->
+<sc-if value="{{ aiPrompt }}" hint-placeholder-val="{{ false }}">
+  <div style="position: absolute; left: 50%; bottom: 96px; transform: translateX(-50%); width: min(560px, calc(100% - 32px)); background: #fff; border-radius: 12px; box-shadow: 0 8px 28px rgba(0,0,0,0.14), 0 0 0 1px rgba(0,0,0,0.06); padding: 10px">
+    <form onSubmit="{{ submitQuick }}" style="display: flex; align-items: center; gap: 8px">
+      <span style="flex: none; font-size: 11px; font-weight: 500; color: #111111; background: #EFEFEF; padding: 3px 8px; border-radius: 4px">{{ ctxLabel }}</span>
+      <input aria-label="Ask Claude" value="{{ prompt }}" onInput="{{ typePrompt }}" placeholder="Ask Claude to change this…" style="flex: 1; min-width: 0; height: 32px; border: 0; outline: none; font-size: 13px">
+      <button type="submit" aria-label="Send" style="width: 32px; height: 32px; border: 0; border-radius: 8px; background: #111111; color: #fff; display: grid; place-items: center; cursor: pointer">
+        <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 13V3M3.5 7.5L8 3L12.5 7.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+      </button>
+      <button type="button" onClick="{{ closeAI }}" aria-label="Close" style="width: 28px; height: 28px; border: 0; background: transparent; border-radius: 6px; cursor: pointer; color: #6B6B6B">✕</button>
+    </form>
+    <div style="display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px">
+      <sc-for list="{{ suggestions }}" as="sg" hint-placeholder-count="3">
+        <button onClick="{{ sg.go }}" style="height: 26px; padding: 0 10px; border: 1px solid #E6E6E6; background: #fff; border-radius: 13px; font-size: 11px; color: #1E1E1E; cursor: pointer">{{ sg.label }}</button>
+      </sc-for>
+    </div>
+    <div style="margin-top: 8px; font-size: 11px; color: #6B6B6B">{{ modelName }} · {{ effort }} · {{ modeShort }} · The conversation continues in the Chat tab.</div>
+  </div>
+</sc-if>
+<sc-if value="{{ aiBusy }}" hint-placeholder-val="{{ false }}">
+  <div style="position: absolute; left: 50%; bottom: 96px; transform: translateX(-50%); background: #fff; border-radius: 20px; box-shadow: 0 4px 16px rgba(0,0,0,0.12), 0 0 0 1px rgba(0,0,0,0.06); padding: 8px 14px; display: flex; align-items: center; gap: 8px">
+    <span style="width: 8px; height: 8px; border-radius: 50%; background: #111111"></span>
+    <span style="font-weight: 500">{{ busyText }}</span>
+  </div>
+</sc-if>
+<sc-if value="{{ aiReview }}" hint-placeholder-val="{{ false }}">
+  <div style="position: absolute; left: 50%; bottom: 96px; transform: translateX(-50%); width: min(580px, calc(100% - 32px)); background: #1E1E1E; color: #fff; border-radius: 12px; box-shadow: 0 8px 28px rgba(0,0,0,0.22); padding: 10px 10px 10px 14px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap">
+    <div style="display: flex; flex-direction: column; line-height: 1.35; min-width: 0; flex: 1">
+      <span style="font-weight: 600">{{ reviewTitle }}</span>
+      <span style="font-size: 11px; color: #C7C7CC">{{ reviewSub }}</span>
+    </div>
+    <div role="group" aria-label="Compare" style="display: flex; background: #3A3A3C; border-radius: 6px; padding: 2px">
+      <button onClick="{{ showBefore }}" style="{{ cmp.before }}">Before</button>
+      <button onClick="{{ showAfter }}" style="{{ cmp.after }}">After</button>
+    </div>
+    <button onClick="{{ discardAI }}" style="height: 30px; padding: 0 12px; border: 1px solid #4A4A4D; background: transparent; color: #fff; border-radius: 6px; font-size: 12px; cursor: pointer">Discard</button>
+    <button onClick="{{ keepAI }}" style="height: 30px; padding: 0 14px; border: 0; background: #fff; color: #111111; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer">Keep</button>
+  </div>
+</sc-if>
+
+<!-- ===== Popovers ===== -->
+<sc-if value="{{ popOpen }}" hint-placeholder-val="{{ false }}">
+  <div onClick="{{ closePop }}" style="position: absolute; inset: 0"></div>
+</sc-if>
+
+<sc-if value="{{ popRepo }}" hint-placeholder-val="{{ false }}">
+  <div role="dialog" aria-label="Project folder" style="position: absolute; left: 44px; top: 48px; width: min(360px, calc(100% - 24px)); max-height: calc(100% - 90px); overflow: auto; background: #fff; border-radius: 12px; box-shadow: 0 12px 36px rgba(0,0,0,0.18), 0 0 0 1px rgba(0,0,0,0.06); line-height: 1.5">
+    <div style="padding: 12px 14px; border-bottom: 1px solid #F0F0F0">
+      <div style="font-weight: 600">{{ repoName }}</div>
+      <div style="font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #6B6B6B">~/code/{{ repoName }}</div>
+    </div>
+    <div style="padding: 10px 14px; display: grid; grid-template-columns: 96px 1fr; gap: 4px 8px; border-bottom: 1px solid #F0F0F0">
+      <span style="color: #6B6B6B">Your version</span><span>design/grace/{{ branchSlug }}</span>
+      <span style="color: #6B6B6B">Framework</span><span>Vite + React 18 + Tailwind</span>
+      <span style="color: #6B6B6B">Storybook</span><span style="color: #047857; font-weight: 500">Found · {{ storyCount }} stories</span>
+      <span style="color: #6B6B6B">Tokens</span><span>src/tokens/tokens.json</span>
+      <span style="color: #6B6B6B">Rules</span><span>CLAUDE.md, design-system.md</span>
+      <span style="color: #6B6B6B">Dev server</span><span>{{ devText }}</span>
+    </div>
+    <div style="padding: 10px 14px; border-bottom: 1px solid #F0F0F0">
+      <div style="font-weight: 600; font-size: 11px; margin-bottom: 4px">Version history</div>
+      <sc-if value="{{ noVersions }}" hint-placeholder-val="{{ true }}"><div style="color: #6B6B6B; font-size: 11px">No saved versions yet. Use Save version in the top bar.</div></sc-if>
+      <sc-for list="{{ versions }}" as="vr" hint-placeholder-count="0">
+        <div style="display: flex; align-items: center; gap: 8px; min-height: 28px">
+          <span style="flex: 1; min-width: 0">{{ vr.name }}</span><span style="color: #6B6B6B; font-size: 11px">{{ vr.time }}</span>
+          <button onClick="{{ vr.restore }}" style="height: 22px; padding: 0 8px; border: 1px solid #E0E0E0; background: #fff; border-radius: 5px; font-size: 11px; cursor: pointer">Restore</button>
+        </div>
+      </sc-for>
+    </div>
+    <div style="padding: 10px 14px; display: flex; flex-direction: column; gap: 6px">
+      <div style="font-weight: 600; font-size: 11px">Open another project</div>
+      <sc-for list="{{ recents }}" as="rc" hint-placeholder-count="2">
+        <button onClick="{{ rc.open }}" style="display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 8px; border: 0; background: #F7F7F8; border-radius: 6px; font-size: 12px; cursor: pointer; text-align: left">
+          <svg width="12" height="12" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 4V12.5H14.5V5.5H7.5L6 4Z" fill="none" stroke="#6B6B6B" stroke-width="1.3"></path></svg>{{ rc.path }}
+        </button>
+      </sc-for>
+      <button onClick="{{ openClone }}" style="height: 28px; border: 1px solid #E0E0E0; background: #fff; border-radius: 6px; font-size: 12px; cursor: pointer">Clone from GitHub…</button>
+    </div>
+  </div>
+</sc-if>
+
+<sc-if value="{{ popClaude }}" hint-placeholder-val="{{ false }}">
+  <div role="dialog" aria-label="Claude settings" style="position: absolute; right: 12px; top: 48px; width: min(360px, calc(100% - 24px)); max-height: calc(100% - 90px); overflow: auto; background: #fff; border-radius: 12px; box-shadow: 0 12px 36px rgba(0,0,0,0.18), 0 0 0 1px rgba(0,0,0,0.06); line-height: 1.45">
+    <div style="padding: 12px 14px; border-bottom: 1px solid #F0F0F0; display: flex; align-items: center; gap: 8px">
+      <span style="font-weight: 600">Claude</span>
+      <span style="margin-left: auto; display: flex; align-items: center; gap: 6px; font-size: 11px; color: #047857"><span style="width: 6px; height: 6px; border-radius: 50%; background: #16A34A"></span>{{ srcStatus }}</span>
+    </div>
+    <div style="padding: 10px 14px; border-bottom: 1px solid #F0F0F0; display: flex; flex-direction: column; gap: 6px">
+      <div style="font-weight: 600; font-size: 11px">Runs on</div>
+      <button onClick="{{ srcLocal }}" style="{{ srcStyles.local }}">
+        <span style="font-weight: 600">Claude Code on this computer</span>
+        <span style="font-size: 11px; color: #6B6B6B">Your installed claude, with its sign-in, settings, skills and MCP servers</span>
+      </button>
+      <button onClick="{{ srcApi }}" style="{{ srcStyles.api }}">
+        <span style="font-weight: 600">Anthropic API key</span>
+        <span style="font-size: 11px; color: #6B6B6B">For a team build of the app. Billed per use.</span>
+      </button>
+    </div>
+    <div style="padding: 10px 14px; border-bottom: 1px solid #F0F0F0; display: flex; flex-direction: column; gap: 4px">
+      <div style="font-weight: 600; font-size: 11px; margin-bottom: 2px">Model</div>
+      <sc-for list="{{ modelRows }}" as="mr" hint-placeholder-count="3">
+        <button onClick="{{ mr.pick }}" style="{{ mr.style }}"><span style="{{ mr.radio }}"></span><span style="display: flex; flex-direction: column; align-items: flex-start"><span style="font-weight: 600">{{ mr.name }}</span><span style="font-size: 11px; color: #6B6B6B">{{ mr.note }}</span></span></button>
+      </sc-for>
+    </div>
+    <div style="padding: 10px 14px; border-bottom: 1px solid #F0F0F0; display: flex; flex-direction: column; gap: 6px">
+      <div style="font-weight: 600; font-size: 11px">Effort</div>
+      <div role="group" aria-label="Effort" style="display: flex; background: #F2F2F3; border-radius: 6px; padding: 2px">
+        <sc-for list="{{ effortTabs }}" as="et" hint-placeholder-count="5"><button onClick="{{ et.pick }}" style="{{ et.style }}">{{ et.label }}</button></sc-for>
+      </div>
+      <div style="font-size: 11px; color: #6B6B6B">Higher effort thinks longer: better for new components, slower for small tweaks.</div>
+    </div>
+    <div style="padding: 10px 14px; border-bottom: 1px solid #F0F0F0; display: flex; flex-direction: column; gap: 4px">
+      <div style="font-weight: 600; font-size: 11px; margin-bottom: 2px">Mode</div>
+      <sc-for list="{{ modeRows }}" as="mr" hint-placeholder-count="3">
+        <button onClick="{{ mr.pick }}" style="{{ mr.style }}"><span style="{{ mr.radio }}"></span><span style="display: flex; flex-direction: column; align-items: flex-start"><span style="font-weight: 600">{{ mr.name }}</span><span style="font-size: 11px; color: #6B6B6B">{{ mr.note }}</span></span></button>
+      </sc-for>
+    </div>
+    <div style="padding: 10px 14px; border-bottom: 1px solid #F0F0F0">
+      <div style="font-weight: 600; font-size: 11px; margin-bottom: 4px">From your Claude Code setup</div>
+      <div style="display: grid; grid-template-columns: 96px 1fr; gap: 4px 8px">
+        <span style="color: #6B6B6B">Memory</span><span>CLAUDE.md, design-system.md</span>
+        <span style="color: #6B6B6B">Skills</span><span>design-system, figma, a11y-check</span>
+        <span style="color: #6B6B6B">MCP servers</span><span>Figma desktop, Canvas (built in), GitHub</span>
+        <span style="color: #6B6B6B">Hooks</span><span>Typecheck and lint after each edit</span>
+        <span style="color: #6B6B6B">Checkpoints</span><span>On · Rewind in the chat</span>
+      </div>
+    </div>
+    <div style="padding: 10px 14px; display: flex; flex-direction: column; gap: 2px">
+      <div style="font-weight: 600; font-size: 11px; margin-bottom: 2px">Chats</div>
+      <sc-for list="{{ chatRows }}" as="cr" hint-placeholder-count="2">
+        <div style="display: flex; align-items: center; min-height: 28px; gap: 8px"><span style="flex: 1">{{ cr.name }}</span><span style="color: #6B6B6B; font-size: 11px">{{ cr.count }}</span><button onClick="{{ cr.resume }}" style="height: 22px; padding: 0 8px; border: 1px solid #E0E0E0; background: #fff; border-radius: 5px; font-size: 11px; cursor: pointer">Resume</button></div>
+      </sc-for>
+    </div>
+  </div>
+</sc-if>
+
+<sc-if value="{{ hasToast }}" hint-placeholder-val="{{ false }}">
+  <div role="status" style="position: absolute; left: 280px; bottom: 40px; max-width: 380px; background: #1E1E1E; color: #fff; font-size: 12px; padding: 10px 12px; border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,0.2); line-height: 1.4">{{ toast }}</div>
+</sc-if>
+
+<!-- ===== Modals ===== -->
+<sc-if value="{{ modalOpen }}" hint-placeholder-val="{{ false }}">
+  <div onClick="{{ closeModal }}" style="position: absolute; inset: 0; background: rgba(20,20,22,0.36); display: flex; align-items: center; justify-content: center; padding: 16px">
+
+    <sc-if value="{{ mImport }}" hint-placeholder-val="{{ false }}">
+      <div role="dialog" aria-label="Import from Figma" onClick="{{ swallow }}" style="width: min(560px, 100%); background: #fff; border-radius: 12px; box-shadow: 0 16px 48px rgba(0,0,0,0.24); overflow: hidden">
+        <div style="padding: 16px 20px; border-bottom: 1px solid #EDEDED; font-size: 14px; font-weight: 600">Import from Figma</div>
+        <div style="padding: 16px 20px; display: flex; flex-direction: column; gap: 14px">
+          <div style="display: flex; flex-direction: column; gap: 6px">
+            <div style="font-weight: 600; font-size: 11px">Connect to Figma with</div>
+            <sc-for list="{{ imp.sources }}" as="sr" hint-placeholder-count="3">
+              <button onClick="{{ sr.pick }}" style="{{ sr.style }}">
+                <span style="{{ sr.radio }}"></span>
+                <span style="display: flex; flex-direction: column; align-items: flex-start; gap: 1px; text-align: left">
+                  <span style="font-weight: 600">{{ sr.name }}<sc-if value="{{ sr.rec }}" hint-placeholder-val="{{ false }}"><span style="margin-left: 6px; font-size: 10px; font-weight: 600; color: #fff; background: #111111; padding: 1px 6px; border-radius: 4px">Recommended</span></sc-if></span>
+                  <span style="font-size: 11px; color: #6B6B6B">{{ sr.note }}</span>
+                </span>
+              </button>
+            </sc-for>
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 6px">
+            <div style="font-weight: 600; font-size: 11px">{{ imp.pageTitle }}</div>
+            <div style="display: flex; align-items: center; gap: 8px; height: 26px"><span style="width: 14px; height: 14px; border-radius: 3px; background: #111111"></span>Onboarding<span style="color: #6B6B6B">· 1 frame · {{ imp.from }}</span></div>
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 6px">
+            <div style="font-weight: 600; font-size: 11px">Variables that differ from your repo</div>
+            <div style="border: 1px solid #EDEDED; border-radius: 8px; overflow: hidden">
+              <label style="display: grid; grid-template-columns: 24px 1fr 120px; align-items: center; gap: 8px; padding: 8px 10px; border-bottom: 1px solid #F2F2F2"><input type="checkbox" checked="{{ imp.a }}" onChange="{{ imp.togA }}" style="accent-color: #111111"><span style="font-family: 'JetBrains Mono', monospace; font-size: 11px">color.badge.popular</span><span style="color: #047857; font-weight: 500">New</span></label>
+              <label style="display: grid; grid-template-columns: 24px 1fr 120px; align-items: center; gap: 8px; padding: 8px 10px; border-bottom: 1px solid #F2F2F2"><input type="checkbox" checked="{{ imp.b }}" onChange="{{ imp.togB }}" style="accent-color: #111111"><span style="font-family: 'JetBrains Mono', monospace; font-size: 11px">color.badge.new</span><span style="color: #047857; font-weight: 500">New</span></label>
+              <label style="display: grid; grid-template-columns: 24px 1fr 120px; align-items: center; gap: 8px; padding: 8px 10px"><input type="checkbox" checked="{{ imp.c }}" onChange="{{ imp.togC }}" style="accent-color: #111111"><span style="font-family: 'JetBrains Mono', monospace; font-size: 11px">radius.lg</span><span style="color: #92400E; font-weight: 500">12 → 16</span></label>
+            </div>
+          </div>
+        </div>
+        <div style="padding: 12px 20px; border-top: 1px solid #EDEDED; display: flex; justify-content: flex-end; gap: 8px">
+          <button onClick="{{ closeModal }}" style="height: 32px; padding: 0 12px; border: 1px solid #E0E0E0; background: #fff; border-radius: 6px; font-size: 12px; cursor: pointer">Cancel</button>
+          <button onClick="{{ doImport }}" style="height: 32px; padding: 0 14px; border: 0; background: #111111; color: #fff; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer">{{ imp.label }}</button>
+        </div>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ mBuild }}" hint-placeholder-val="{{ false }}">
+      <div role="dialog" aria-label="Build PlanBadge in code" onClick="{{ swallow }}" style="width: min(620px, 100%); background: #fff; border-radius: 12px; box-shadow: 0 16px 48px rgba(0,0,0,0.24); overflow: hidden">
+        <div style="padding: 16px 20px; border-bottom: 1px solid #EDEDED; display: flex; align-items: center; gap: 8px; flex-wrap: wrap">
+          <span style="font-size: 14px; font-weight: 600">Build PlanBadge in code</span>
+          <span style="font-size: 11px; color: #6B6B6B">{{ buildStepLabel }}</span>
+          <span style="margin-left: auto; font-size: 11px; color: #6B6B6B">{{ modelName }} · {{ effort }}</span>
+        </div>
+        <sc-if value="{{ bPlan }}" hint-placeholder-val="{{ true }}">
+          <div style="padding: 16px 20px; display: flex; flex-direction: column; gap: 12px; line-height: 1.5">
+            <div style="color: #6B6B6B">Claude read the Figma component set and your repo. Rename the props if you like, then build.</div>
+            <div style="border: 1px solid #EDEDED; border-radius: 8px; overflow: hidden">
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 8px 10px; background: #F7F7F8; font-weight: 600; font-size: 11px"><span>Figma property</span><span>Code prop</span></div>
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 6px 10px; border-top: 1px solid #F2F2F2; align-items: center"><span>Variant · Popular, New, Sale</span><input aria-label="Prop for Variant" value="{{ propV }}" onInput="{{ setPropV }}" style="height: 26px; border: 1px solid #E0E0E0; border-radius: 5px; padding: 0 6px; font-family: 'JetBrains Mono', monospace; font-size: 11px; min-width: 0"></div>
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 6px 10px; border-top: 1px solid #F2F2F2; align-items: center"><span>Size · sm, md</span><input aria-label="Prop for Size" value="{{ propS }}" onInput="{{ setPropS }}" style="height: 26px; border: 1px solid #E0E0E0; border-radius: 5px; padding: 0 6px; font-family: 'JetBrains Mono', monospace; font-size: 11px; min-width: 0"></div>
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 6px 10px; border-top: 1px solid #F2F2F2; align-items: center"><span>Label · text</span><span style="font-family: 'JetBrains Mono', monospace; font-size: 11px">children</span></div>
+            </div>
+            <div style="display: grid; grid-template-columns: 90px 1fr; gap: 6px 10px">
+              <span style="color: #6B6B6B">Reuses</span><span>tokens color.badge.*, radius.full</span>
+              <span style="color: #6B6B6B">Writes</span><span style="font-family: 'JetBrains Mono', monospace; font-size: 11px">PlanBadge.tsx, PlanBadge.stories.tsx</span>
+            </div>
+          </div>
+          <div style="padding: 12px 20px; border-top: 1px solid #EDEDED; display: flex; justify-content: flex-end; gap: 8px">
+            <button onClick="{{ closeModal }}" style="height: 32px; padding: 0 12px; border: 1px solid #E0E0E0; background: #fff; border-radius: 6px; font-size: 12px; cursor: pointer">Cancel</button>
+            <button onClick="{{ runBuild }}" style="height: 32px; padding: 0 14px; border: 0; background: #111111; color: #fff; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer">Build it</button>
+          </div>
+        </sc-if>
+        <sc-if value="{{ bBuilding }}" hint-placeholder-val="{{ false }}">
+          <div style="padding: 20px; display: flex; flex-direction: column; gap: 4px">
+            <sc-for list="{{ buildSteps }}" as="st" hint-placeholder-count="4">
+              <div style="display: flex; align-items: center; gap: 8px; height: 26px"><span style="{{ st.dot }}"></span><span style="{{ st.style }}">{{ st.label }}</span></div>
+            </sc-for>
+          </div>
+        </sc-if>
+        <sc-if value="{{ bCompare }}" hint-placeholder-val="{{ false }}">
+          <div style="padding: 16px 20px; display: flex; flex-direction: column; gap: 10px">
+            <div style="display: grid; grid-template-columns: 90px 1fr 1fr 90px; gap: 8px; font-weight: 600; font-size: 11px; color: #6B6B6B"><span>Variant</span><span>Figma</span><span>Code (live)</span><span>Match</span></div>
+            <sc-for list="{{ variants }}" as="v" hint-placeholder-count="3">
+              <div style="display: grid; grid-template-columns: 90px 1fr 1fr 90px; gap: 8px; align-items: center; padding: 8px 0; border-top: 1px solid #F2F2F2">
+                <span>{{ v.name }}</span><span><span style="{{ v.chip }}">{{ v.name }}</span></span><span><span style="{{ v.chip }}">{{ v.name }}</span></span><span style="color: #047857; font-weight: 500">{{ v.match }}</span>
+              </div>
+            </sc-for>
+            <div style="color: #6B6B6B; font-size: 11px">Example values. Match is a pixel comparison of the live render against the Figma variant.</div>
+          </div>
+          <div style="padding: 12px 20px; border-top: 1px solid #EDEDED; display: flex; justify-content: flex-end; gap: 8px">
+            <button onClick="{{ closeModal }}" style="height: 32px; padding: 0 12px; border: 1px solid #E0E0E0; background: #fff; border-radius: 6px; font-size: 12px; cursor: pointer">Discard</button>
+            <button onClick="{{ keepBuild }}" style="height: 32px; padding: 0 14px; border: 0; background: #111111; color: #fff; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer">Keep and link</button>
+          </div>
+        </sc-if>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ mSave }}" hint-placeholder-val="{{ false }}">
+      <div role="dialog" aria-label="Save version" onClick="{{ swallow }}" style="width: min(440px, 100%); background: #fff; border-radius: 12px; box-shadow: 0 16px 48px rgba(0,0,0,0.24); overflow: hidden">
+        <div style="padding: 16px 20px; border-bottom: 1px solid #EDEDED; font-size: 14px; font-weight: 600">Save version</div>
+        <form onSubmit="{{ doSave }}" style="padding: 16px 20px; display: flex; flex-direction: column; gap: 10px; line-height: 1.5">
+          <label for="v-name" style="font-weight: 600; font-size: 11px">What did you change?</label>
+          <input id="v-name" value="{{ vdraft }}" onInput="{{ typeVname }}" style="height: 32px; border: 1px solid #E0E0E0; border-radius: 6px; padding: 0 10px; font-size: 12px">
+          <div style="color: #6B6B6B">{{ saveSummary }}</div>
+          <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px">
+            <button type="button" onClick="{{ closeModal }}" style="height: 32px; padding: 0 12px; border: 1px solid #E0E0E0; background: #fff; border-radius: 6px; font-size: 12px; cursor: pointer">Cancel</button>
+            <button type="submit" style="height: 32px; padding: 0 14px; border: 0; background: #111111; color: #fff; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer">Save version</button>
+          </div>
+        </form>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ mShare }}" hint-placeholder-val="{{ false }}">
+      <div role="dialog" aria-label="Share for review" onClick="{{ swallow }}" style="width: min(520px, 100%); background: #fff; border-radius: 12px; box-shadow: 0 16px 48px rgba(0,0,0,0.24); overflow: hidden">
+        <div style="padding: 16px 20px; border-bottom: 1px solid #EDEDED; font-size: 14px; font-weight: 600">Share for review</div>
+        <div style="padding: 16px 20px; display: flex; flex-direction: column; gap: 8px; line-height: 1.5">
+          <div style="font-weight: 600">{{ vname }}</div>
+          <div style="color: #6B6B6B; font-size: 11px">Claude's summary for developers</div>
+          <sc-for list="{{ shareLines }}" as="sl" hint-placeholder-count="2"><div>· {{ sl }}</div></sc-for>
+          <div style="color: #6B6B6B; margin-top: 4px">Opens a pull request from design/grace/{{ branchSlug }} into main, with before and after screenshots.</div>
+        </div>
+        <div style="padding: 12px 20px; border-top: 1px solid #EDEDED; display: flex; justify-content: flex-end; gap: 8px">
+          <button onClick="{{ closeModal }}" style="height: 32px; padding: 0 12px; border: 1px solid #E0E0E0; background: #fff; border-radius: 6px; font-size: 12px; cursor: pointer">Cancel</button>
+          <button onClick="{{ doShare }}" style="height: 32px; padding: 0 14px; border: 0; background: #111111; color: #fff; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer">Send for review</button>
+        </div>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ mTrust }}" hint-placeholder-val="{{ false }}">
+      <div role="dialog" aria-label="Trust this folder" onClick="{{ swallow }}" style="width: min(440px, 100%); background: #fff; border-radius: 12px; box-shadow: 0 16px 48px rgba(0,0,0,0.24); overflow: hidden">
+        <div style="padding: 16px 20px; border-bottom: 1px solid #EDEDED; font-size: 14px; font-weight: 600">Open {{ trustPath }}?</div>
+        <div style="padding: 16px 20px; line-height: 1.55; color: #3F3F46">Opening a project installs its packages and runs its dev server, and Claude can edit its files. Only open folders you trust.</div>
+        <div style="padding: 12px 20px; border-top: 1px solid #EDEDED; display: flex; justify-content: flex-end; gap: 8px">
+          <button onClick="{{ closeModal }}" style="height: 32px; padding: 0 12px; border: 1px solid #E0E0E0; background: #fff; border-radius: 6px; font-size: 12px; cursor: pointer">Cancel</button>
+          <button onClick="{{ doTrust }}" style="height: 32px; padding: 0 14px; border: 0; background: #111111; color: #fff; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer">Trust and open</button>
+        </div>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ mClone }}" hint-placeholder-val="{{ false }}">
+      <div role="dialog" aria-label="Clone from GitHub" onClick="{{ swallow }}" style="width: min(440px, 100%); background: #fff; border-radius: 12px; box-shadow: 0 16px 48px rgba(0,0,0,0.24); overflow: hidden">
+        <div style="padding: 16px 20px; border-bottom: 1px solid #EDEDED; font-size: 14px; font-weight: 600">Clone from GitHub</div>
+        <form onSubmit="{{ doClone }}" style="padding: 16px 20px; display: flex; flex-direction: column; gap: 8px">
+          <label for="clone-url" style="font-weight: 600; font-size: 11px">Repository</label>
+          <input id="clone-url" value="{{ cloneUrl }}" onInput="{{ typeClone }}" placeholder="owner/repo" style="height: 32px; border: 1px solid #E0E0E0; border-radius: 6px; padding: 0 10px; font-size: 12px">
+          <div style="color: #6B6B6B; font-size: 11px">Cloned into ~/code. You'll be asked to trust it before anything runs.</div>
+          <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px">
+            <button type="button" onClick="{{ closeModal }}" style="height: 32px; padding: 0 12px; border: 1px solid #E0E0E0; background: #fff; border-radius: 6px; font-size: 12px; cursor: pointer">Cancel</button>
+            <button type="submit" style="height: 32px; padding: 0 14px; border: 0; background: #111111; color: #fff; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer">Clone</button>
+          </div>
+        </form>
+      </div>
+    </sc-if>
+  </div>
+</sc-if>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  componentWillUnmount() { (this._timers || []).forEach(function (t) { clearTimeout(t); }); }
+  later(ms, fn) { this._timers = this._timers || []; this._timers.push(setTimeout(fn, ms)); }
+  st(k, d) { const s = this.state || {}; return s[k] === undefined ? d : s[k]; }
+  say(msg) {
+    this.setState({ toast: msg });
+    this.later(3600, () => { if (this.state && this.state.toast === msg) this.setState({ toast: '' }); });
+  }
+  design() {
+    const g = (k, d) => this.st(k, d);
+    return {
+      pads: g('pads', ['space.5', 'space.5', 'space.5']), gapTok: g('gapTok', 'space.4'),
+      cardVar: g('cardVar', ['outlined', 'outlined', 'outlined']), cardSize: g('cardSize', ['md', 'md', 'md']),
+      liveTheme: g('liveTheme', 'light'), brand: g('brand', '#2563EB'), emptyState: g('emptyState', false),
+      radTok: g('radTok', 'md'), weightTok: g('weightTok', '500'), extraVariant: g('extraVariant', false),
+      extraStories: g('extraStories', false), items: g('items', []), frameW: g('frameW', 400), driftFixed: g('driftFixed', false)
+    };
+  }
+  commit(patch, msg, n) {
+    const undo = this.st('undo', []).concat([this.design()]).slice(-40);
+    this.setState(Object.assign({}, patch, { undo: undo, changes: this.st('changes', 0) + (n == null ? 1 : n) }));
+    if (msg) this.say(msg);
+  }
+  doUndoNow() {
+    const u = this.st('undo', []);
+    if (!u.length) { this.say('Nothing to undo.'); return; }
+    this.setState(Object.assign({}, u[u.length - 1], { undo: u.slice(0, -1), changes: Math.max(0, this.st('changes', 0) - 1) }));
+    this.say('Undone.');
+  }
+  chats() {
+    return this.st('chats', [
+      { name: 'Settings polish', msgs: [] },
+      { name: 'PlanBadge from Figma', msgs: [
+        { role: 'user', text: 'What is missing in code from the Onboarding page?' },
+        { role: 'claude', meta: 'Sonnet 5.5 · medium', status: 'done', text: 'Only PlanBadge. Everything else on Onboarding maps to Card and Button. Import the page, select PlanBadge and choose Build in code.' }
+      ] }
+    ]);
+  }
+  editChat(ci, fn) {
+    const cs = this.chats().slice();
+    cs[ci] = Object.assign({}, cs[ci], { msgs: fn(cs[ci].msgs.slice()) });
+    this.setState({ chats: cs });
+  }
+  pushMsgs(ci, arr) { this.editChat(ci, (m) => m.concat(arr)); }
+  patchLast(ci, p) { this.editChat(ci, (m) => { m[m.length - 1] = Object.assign({}, m[m.length - 1], p); return m; }); }
+  meta() {
+    const names = { opus: 'Opus 5.5', sonnet: 'Sonnet 5.5', haiku: 'Haiku 5.5' };
+    return names[this.st('model', 'opus')] + ' · ' + this.st('effort', 'high');
+  }
+  interpret(p) {
+    const t = p.toLowerCase();
+    const sel = this.st('sel', 'card');
+    const items = this.st('items', []);
+    const selId = this.st('selItem', null);
+    if (sel === 'item' && /code|build|component|real/.test(t)) {
+      const it = items.find((x) => x.id === selId);
+      if (it) {
+        const nm = (it.name || 'NewBlock').replace(/[^A-Za-z0-9]/g, '') || 'NewBlock';
+        return { patch: { items: items.map((x) => (x.id === selId ? Object.assign({}, x, { code: true }) : x)) }, files: [nm + '.tsx', nm + '.stories.tsx'], summary: it.name + ' is now a component, using your tokens', plan: ['Read the frame layout and colours', 'Write ' + nm + '.tsx with your tokens and a story', 'Link the drawn frame to the new component'] };
+      }
+    }
+    if (/dens|compact|tight|spacing|smaller|less space/.test(t)) return { patch: { pads: ['space.3', 'space.3', 'space.3'], gapTok: 'space.2' }, files: ['Card.tsx', 'settings/page.tsx'], summary: 'Card padding space.5 → space.3 and list gap space.4 → space.2', plan: ['Card.tsx: padding token space.5 → space.3', 'settings/page.tsx: list gap space.4 → space.2', 'Run the typecheck and lint hooks'] };
+    if (/dark/.test(t)) return { patch: { liveTheme: 'dark' }, files: ['theme.css'], summary: 'Switched the app to the dark token mode', plan: ['Turn on the dark token mode in theme.css', 'Check text contrast on cards and buttons'] };
+    if (/light/.test(t)) return { patch: { liveTheme: 'light' }, files: ['theme.css'], summary: 'Switched the app back to the light token mode', plan: ['Turn on the light token mode in theme.css'] };
+    if (/empty/.test(t)) return { patch: { emptyState: true }, files: ['EmptyState.tsx', 'settings/page.tsx'], summary: 'Added an empty state below the settings cards', plan: ['Write EmptyState.tsx with Card and Button', 'Show it on /settings when there are no notifications'] };
+    if (/teal|green|brand|colou?r|purple|orange/.test(t)) {
+      const c = /purple/.test(t) ? '#7C3AED' : (/orange/.test(t) ? '#EA580C' : '#0F766E');
+      return { patch: { brand: c }, files: ['tokens.json'], summary: 'color.brand.500 is now ' + c, plan: ['Change color.brand.500 in tokens.json', 'Check contrast of white text on the new colour'] };
+    }
+    if (/round|pill|radius/.test(t)) return { patch: { radTok: 'full' }, files: ['Button.tsx'], summary: 'Button radius radius.md → radius.full', plan: ['Button.tsx: radius token radius.md → radius.full'] };
+    if (/variant|outline/.test(t)) return { patch: { extraVariant: true }, files: ['Button.tsx', 'Button.stories.tsx'], summary: 'Added an outline variant to Button, with stories', plan: ['Add variant "outline" to Button.tsx', 'Add an Outline story for each size'] };
+    if (/stor(y|ies)/.test(t)) return { patch: { extraStories: true }, files: ['Button.stories.tsx'], summary: 'Added LongLabel and RightToLeft stories to Button', plan: ['Write LongLabel and RightToLeft stories'] };
+    return null;
+  }
+  runAI(text) {
+    const p = (text || '').trim();
+    if (!p) return;
+    const ai = this.st('ai', 'idle');
+    if (ai !== 'idle' && ai !== 'prompt') { this.say('Claude is still on the last request. Keep or discard it first.'); return; }
+    const ci = this.st('chatIdx', 0), meta = this.meta();
+    this.setState({ left: 'chat', prompt: '', chatInput: '', ai: 'idle' });
+    if (this.st('sel', 'card') === 'badge' && !this.st('built', false) && /build|code|component/.test(p.toLowerCase())) {
+      this.pushMsgs(ci, [{ role: 'user', text: p }, { role: 'claude', meta: meta, status: 'done', text: 'PlanBadge isn\'t in your code yet, so I opened the build flow. Check the props, then build.' }]);
+      this.setState({ modal: 'build', bstep: 'plan' });
+      return;
+    }
+    const ed = this.interpret(p);
+    if (!ed) {
+      this.pushMsgs(ci, [{ role: 'user', text: p }, { role: 'claude', meta: meta, status: 'done', text: 'In this prototype I can make the cards denser, add an empty state, switch dark or light mode, change the brand colour, round the buttons, add a Button variant, write stories, or turn a frame you drew into code. In the real app, Claude Code on your computer would handle any request in your repo.' }]);
+      return;
+    }
+    this.pushMsgs(ci, [{ role: 'user', text: p }, { role: 'claude', meta: meta, status: 'running', text: 'On it.' }]);
+    this.setState({ pending: ed, aiChat: ci, lastPrompt: p });
+    if (this.st('mode', 'ask') === 'plan') {
+      this.setState({ ai: 'planning', step: 0 });
+      this.later(900, () => { this.setState({ ai: 'plan' }); this.patchLast(ci, { status: 'plan', text: 'Here\'s my plan. Approve it and I\'ll make the edits.', plan: ed.plan }); });
+      return;
+    }
+    this.startEdits(ci);
+  }
+  startEdits(ci) {
+    this.setState({ ai: 'running', step: 0 });
+    this.patchLast(ci, { status: 'running', text: 'Working on it.' });
+    [1, 2, 3, 4].forEach((n) => this.later(650 * n, () => {
+      if (n < 4) { this.setState({ step: n }); return; }
+      const ed = this.st('pending', null);
+      if (!ed) return;
+      if (this.st('mode', 'ask') === 'auto') { this.applyPending('Applied straight away. Rewind it from the chat if you change your mind.'); return; }
+      this.setState({ ai: 'review', before: false, step: 4 });
+      this.patchLast(ci, { status: 'review', text: ed.summary + '. Keep it?', files: ed.files });
+    }));
+  }
+  applyPending(note) {
+    const ed = this.st('pending', null), ci = this.st('aiChat', 0);
+    if (!ed) return;
+    const snap = this.design();
+    this.commit(ed.patch, null, ed.files.length);
+    this.setState({ ai: 'idle', pending: null, before: false });
+    this.patchLast(ci, { status: 'kept', text: ed.summary + '.', files: ed.files, snap: snap });
+    this.say(note || 'Kept. Save a version when you are ready.');
+  }
+  discardPending() {
+    const ci = this.st('aiChat', 0);
+    this.setState({ ai: 'idle', pending: null, before: false });
+    this.patchLast(ci, { status: 'discarded' });
+    this.say('Discarded. Nothing changed in your repo.');
+  }
+  addItem(kind, x, y) {
+    const items = this.st('items', []);
+    const n = items.filter((i) => i.kind === kind).length + 1;
+    const id = 'i' + Date.now();
+    const base = { frame: { name: 'Frame ' + n, w: 240, h: 160, fill: '#FFFFFF' }, rect: { name: 'Rectangle ' + n, w: 120, h: 80, fill: '#D4D4D4' }, text: { name: 'Text ' + n, w: 0, h: 0, text: 'Type something' }, note: { name: 'Comment ' + n, w: 0, h: 0, text: 'Should this be denser?' } }[kind];
+    const it = Object.assign({ id: id, kind: kind, x: Math.round(x), y: Math.round(y) }, base);
+    this.commit({ items: items.concat([it]), sel: 'item', selItem: id, tool: 'move', tab: 'design' }, null, 0);
+  }
+  updItem(patch, record) {
+    const id = this.st('selItem', null);
+    const items = this.st('items', []).map((x) => (x.id === id ? Object.assign({}, x, patch) : x));
+    if (record) this.commit({ items: items }, null, 0); else this.setState({ items: items });
+  }
+
+  renderVals() {
+    const g = (k, d) => this.st(k, d);
+    const D = this.design();
+    const view = g('view', 'canvas'), pop = g('pop', null), left = g('left', 'layers');
+    const sel = g('sel', 'card'), cardIdx = g('cardIdx', 1), tab = g('tab', 'design');
+    const tool = g('tool', 'move'), ai = g('ai', 'idle'), step = g('step', 0), before = g('before', false);
+    const modal = g('modal', null), figma = g('figma', false), bstep = g('bstep', 'plan'), bprog = g('bprog', 0);
+    const built = g('built', false), changes = g('changes', 0), toast = g('toast', ''), pulling = g('pulling', false), pulled = g('pulled', false);
+    const pr = g('pr', false), scope = g('scope', 'one'), vname = g('vname', 'Settings polish');
+    const src = g('src', 'local'), model = g('model', 'opus'), effort = g('effort', 'high'), mode = g('mode', 'ask');
+    const route = g('route', 'settings'), zoom = g('zoom', 1), pan = g('pan', { x: 0, y: 0 });
+    const repoName = g('repoName', 'acme-web'), dev = g('dev', 'running');
+    const pending = g('pending', null);
+    const E = Object.assign({}, D, (ai === 'review' && !before && pending) ? pending.patch : {});
+    const V = '#111111';
+    const stop = (fn) => (e) => { if (e && e.stopPropagation) e.stopPropagation(); fn(e); };
+    const SP = { 'space.2': 8, 'space.3': 12, 'space.4': 16, 'space.5': 20, 'space.6': 24 };
+    const R = { sm: '4px', md: '6px', full: '999px' };
+    const btnR = R[E.radTok];
+    const dk = E.liveTheme === 'dark';
+    const brand = E.brand;
+
+    const pill = (on) => 'height: 26px; padding: 0 10px; border: 0; border-radius: 5px; font-size: 12px; cursor: pointer; ' + (on ? 'background: #F2F2F3; font-weight: 600; color: #1E1E1E' : 'background: transparent; color: #6B6B6B; font-weight: 500');
+    const seg = (on) => 'flex: 1; height: 24px; padding: 0 8px; border: 0; border-radius: 4px; font-size: 11px; cursor: pointer; white-space: nowrap; ' + (on ? 'background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,0.1); font-weight: 600; color: #1E1E1E' : 'background: transparent; color: #4B4B4B');
+    const segDark = (on) => 'height: 26px; padding: 0 10px; border: 0; border-radius: 4px; font-size: 11px; cursor: pointer; ' + (on ? 'background: #fff; color: #1E1E1E; font-weight: 600' : 'background: transparent; color: #E5E5E5');
+    const viewSeg = (on) => 'height: 28px; padding: 0 14px; border: 0; border-radius: 6px; font-size: 12px; cursor: pointer; ' + (on ? 'background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,0.1); font-weight: 600; color: #1E1E1E' : 'background: transparent; color: #4B4B4B; font-weight: 500');
+    const chipBtn = (on) => 'display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 8px; border: 0; border-radius: 6px; font-size: 12px; color: #1E1E1E; cursor: pointer; ' + (on ? 'background: #F2F2F3' : 'background: transparent');
+    const dotSt = (s) => 'flex: none; width: 10px; height: 10px; border-radius: 50%; box-sizing: border-box; ' + (s === 'done' ? 'background: #16A34A' : (s === 'active' ? 'border: 2px solid ' + V : 'border: 1.5px solid #D4D4D8'));
+    const stepRows = (labels, cur) => labels.map((l, i) => ({ label: l, dot: dotSt(i < cur ? 'done' : (i === cur ? 'active' : 'pending')), style: i > cur ? 'color: #6B6B6B' : (i === cur ? 'color: #1E1E1E; font-weight: 500' : 'color: #1E1E1E') }));
+
+    // Claude settings
+    const models = [
+      { id: 'opus', name: 'Opus 5.5', note: 'Most capable. Best for new components and big changes.' },
+      { id: 'sonnet', name: 'Sonnet 5.5', note: 'Fast and strong. A good default for edits.' },
+      { id: 'haiku', name: 'Haiku 5.5', note: 'Quickest. For small tweaks and copy.' }
+    ];
+    const modes = [
+      { id: 'ask', name: 'Ask before edits', short: 'Ask first', note: 'Claude shows each change; you keep or discard it.' },
+      { id: 'plan', name: 'Plan first', short: 'Plan first', note: 'Claude writes a plan you approve before it edits.' },
+      { id: 'auto', name: 'Auto-accept edits', short: 'Auto-edit', note: 'Changes land straight away. Rewind from the chat.' }
+    ];
+    const efforts = ['low', 'medium', 'high', 'xhigh', 'max'];
+    const modelName = models.find((m) => m.id === model).name;
+    const modeObj = modes.find((m) => m.id === mode);
+    const radio = (on) => 'flex: none; width: 14px; height: 14px; border-radius: 50%; margin-top: 2px; box-sizing: border-box; ' + (on ? 'border: 4px solid ' + V : 'border: 1.5px solid #A1A1AA');
+    const rowBtn = (on) => 'display: flex; align-items: flex-start; gap: 8px; width: 100%; padding: 6px 8px; border: 0; border-radius: 6px; text-align: left; font-size: 12px; color: #1E1E1E; cursor: pointer; ' + (on ? 'background: #EFEFEF' : 'background: transparent');
+    const srcBtn = (on) => 'display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%; padding: 8px 10px; border-radius: 8px; text-align: left; font-size: 12px; color: #1E1E1E; cursor: pointer; background: #fff; ' + (on ? 'border: 1.5px solid ' + V : 'border: 1px solid #E6E6E6');
+
+    // Live frame
+    const routes = {
+      settings: { title: 'Settings', path: '/settings', file: 'src/app/settings/page.tsx', sub: 'Manage your account and preferences', cards: [{ t: 'Profile', d: 'Name, photo and email' }, { t: 'Notifications', d: 'Email and push preferences' }, { t: 'Billing', d: 'Plan, invoices and payment' }] },
+      billing: { title: 'Billing', path: '/billing', file: 'src/app/billing/page.tsx', sub: 'Plan, payments and invoices', cards: [{ t: 'Plan', d: 'Pro · €12 a month' }, { t: 'Payment method', d: 'Visa ending 4242' }, { t: 'Invoices', d: '12 invoices, latest 1 Nov' }] }
+    };
+    const RT = routes[route];
+    const ink = dk ? '#F4F4F5' : '#1E1E1E', sub = dk ? '#A1A1AA' : '#6B6B6B';
+    const cards = RT.cards.map((c, i) => {
+      const on = sel === 'card' && cardIdx === i;
+      const pad = SP[E.pads[i]], v = E.cardVar[i], sz = E.cardSize[i];
+      const surf = v === 'elevated' ? ('background: ' + (dk ? '#27272A' : '#fff') + '; border: 1px solid transparent; box-shadow: 0 4px 14px rgba(0,0,0,' + (dk ? '0.4' : '0.10') + ')') : (v === 'ghost' ? 'background: transparent; border: 1px dashed ' + (dk ? '#52525B' : '#D4D4D8') : 'background: ' + (dk ? '#18181B' : '#fff') + '; border: 1px solid ' + (dk ? '#27272A' : '#E4E4E7'));
+      const h = 2 * pad + (sz === 'sm' ? 34 : (sz === 'lg' ? 46 : 40));
+      return {
+        t: c.t, d: c.d, selected: on, editing: (ai === 'running' || ai === 'planning') && i === cardIdx,
+        dims: (D.frameW - 48) + ' × ' + h,
+        style: 'position: relative; border-radius: 8px; padding: ' + pad + 'px ' + Math.max(pad, 14) + 'px; display: flex; align-items: center; justify-content: space-between; gap: 12px; transition: padding .25s ease, background .25s; cursor: pointer; ' + surf + ';' + (on ? ' outline: 1.5px solid ' + V + ';' : ''),
+        titleStyle: 'font-weight: 600; margin-bottom: 2px; color: ' + ink + '; font-size: ' + (sz === 'sm' ? 13 : (sz === 'lg' ? 16 : 14)) + 'px',
+        descStyle: 'font-size: 12px; color: ' + sub,
+        btnStyle: 'flex: none; height: 28px; padding: 0 12px; display: inline-flex; align-items: center; border: 1px solid ' + (dk ? '#3F3F46' : '#D4D4D8') + '; border-radius: ' + btnR + '; font-size: 12px; font-weight: ' + E.weightTok + '; color: ' + ink + '; background: ' + (dk ? '#27272A' : '#fff') + '; transition: border-radius .3s ease',
+        pick: stop(() => this.setState({ sel: 'card', cardIdx: i, tab: 'design' }))
+      };
+    });
+    const live = {
+      header: 'height: 40px; display: flex; align-items: center; justify-content: space-between; padding: 0 20px; border-bottom: 1px solid ' + (dk ? '#27272A' : '#ECECEF') + '; background: ' + (dk ? '#18181B' : '#fff') + '; color: ' + ink,
+      avatar: 'width: 22px; height: 22px; border-radius: 50%; background: ' + brand,
+      sub: 'font-size: 12px; color: ' + sub + '; margin-bottom: 16px',
+      empty: 'border: 1.5px dashed ' + (dk ? '#3F3F46' : '#D4D4D8') + '; border-radius: 8px; padding: 20px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 6px; color: ' + ink,
+      emptySub: 'font-size: 12px; color: ' + sub + '; max-width: 260px',
+      emptyBtn: 'margin-top: 6px; height: 30px; padding: 0 14px; display: inline-flex; align-items: center; border-radius: ' + btnR + '; font-size: 12px; font-weight: 600; color: #fff; background: ' + brand
+    };
+
+    // Items
+    const items = E.items;
+    const selItemId = g('selItem', null);
+    const itemsV = items.map((it, idx) => {
+      const on = sel === 'item' && selItemId === it.id;
+      const ring = on ? ' outline: 1.5px solid ' + V + '; outline-offset: 1px;' : '';
+      let st = 'position: absolute; left: ' + it.x + 'px; top: ' + it.y + 'px; cursor: move;';
+      if (it.kind === 'frame') st += ' width: ' + it.w + 'px; height: ' + it.h + 'px; background: ' + it.fill + '; box-shadow: 0 0 0 1px rgba(0,0,0,0.08);' + ring;
+      if (it.kind === 'rect') st += ' width: ' + it.w + 'px; height: ' + it.h + 'px; background: ' + it.fill + '; border-radius: 4px;' + ring;
+      if (it.kind === 'text') st += ' font-size: 16px; color: #1E1E1E; white-space: nowrap; padding: 2px;' + ring;
+      if (it.kind === 'note') st += ' width: 26px; height: 26px; border-radius: 13px 13px 13px 2px; background: ' + V + '; color: #fff; font-size: 11px; font-weight: 600; display: grid; place-items: center;' + (on ? ' box-shadow: 0 0 0 3px rgba(17,17,17,0.3);' : '');
+      return {
+        style: st, name: it.name, text: it.text, num: items.filter((x, j) => x.kind === 'note' && j <= idx).length,
+        isFrame: it.kind === 'frame', isText: it.kind === 'text', isNote: it.kind === 'note', showBubble: it.kind === 'note' && on, isCode: !!it.code,
+        down: (e) => {
+          if (e && e.stopPropagation) e.stopPropagation();
+          this._drag = { id: it.id, sx: e.clientX, sy: e.clientY, ox: it.x, oy: it.y, moved: false, before: this.design() };
+          this.setState({ sel: 'item', selItem: it.id, tab: 'design' });
+        }
+      };
+    });
+    const selIt = items.find((x) => x.id === selItemId);
+    const selItem = selIt ? {
+      name: selIt.name, x: selIt.x, y: selIt.y, w: selIt.w, h: selIt.h, fill: selIt.fill || '#FFFFFF', text: selIt.text || '',
+      sized: selIt.kind === 'frame' || selIt.kind === 'rect', hasFill: selIt.kind === 'frame' || selIt.kind === 'rect',
+      hasText: selIt.kind === 'text' || selIt.kind === 'note', textLabel: selIt.kind === 'note' ? 'Comment' : 'Text',
+      canCode: selIt.kind !== 'note' && !selIt.code,
+      tag: selIt.code ? 'In code' : (selIt.kind === 'note' ? 'Comment' : 'Design only'),
+      tagStyle: 'margin-left: auto; font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 4px; ' + (selIt.code ? 'color: #065F46; background: #D1FAE5' : 'color: #3F3F46; background: #F4F4F5')
+    } : { name: '', x: 0, y: 0, w: 0, h: 0, fill: '#FFFFFF', text: '', sized: false, hasFill: false, hasText: false, canCode: false, tag: '', tagStyle: '' };
+
+    // Layers
+    const tagMissing = 'margin-left: auto; font-size: 10px; font-weight: 600; color: #92400E; background: #FEF3C7; padding: 1px 5px; border-radius: 4px';
+    const tagCode = 'margin-left: auto; font-size: 10px; font-weight: 600; color: #065F46; background: #D1FAE5; padding: 1px 5px; border-radius: 4px';
+    const layerRow = (label, depth, kind, isSel, pick, tag, tagStyle) => ({
+      label: label, isFrame: kind === 'frame', isComp: kind === 'comp', isText: kind === 'text', isShape: kind === 'rect', isNote: kind === 'note',
+      hasTag: !!tag, tag: tag || '', tagStyle: tagStyle || '',
+      style: 'display: flex; align-items: center; gap: 6px; height: 26px; width: 100%; border: 0; text-align: left; font-size: 12px; color: #1E1E1E; cursor: pointer; border-radius: 5px; padding: 0 8px 0 ' + (8 + depth * 14) + 'px; ' + (isSel ? 'background: #EFEFEF' : 'background: transparent'),
+      labelStyle: kind === 'frame' ? 'font-weight: 600' : (kind === 'comp' ? 'color: #111111' : ''),
+      pick: pick
+    });
+    const pickFrame = stop(() => this.setState({ sel: 'frame', tab: 'design' }));
+    const layers = [layerRow(RT.title, 0, 'frame', sel === 'frame', pickFrame), layerRow('Title', 1, 'text', false, pickFrame)];
+    RT.cards.forEach((c, i) => layers.push(layerRow('Card · ' + c.t, 1, 'comp', sel === 'card' && cardIdx === i, () => this.setState({ sel: 'card', cardIdx: i, tab: 'design' }))));
+    if (E.emptyState && route === 'settings') layers.push(layerRow('EmptyState', 1, 'comp', false, pickFrame));
+    if (figma) {
+      layers.push(layerRow('Onboarding', 0, 'frame', false, () => this.setState({ sel: null })));
+      layers.push(layerRow('PlanBadge', 1, 'comp', sel === 'badge', () => this.setState({ sel: 'badge', tab: 'design' }), built ? 'In code' : 'Not in code', built ? tagCode : tagMissing));
+    }
+    items.forEach((it) => layers.push(layerRow(it.name, 0, it.kind, sel === 'item' && selItemId === it.id, () => this.setState({ sel: 'item', selItem: it.id, tab: 'design' }), it.code ? 'In code' : '', tagCode)));
+
+    const pageStyle = (on) => 'display: flex; align-items: center; gap: 8px; height: 26px; width: 100%; padding: 0 8px; border: 0; border-radius: 5px; font-size: 12px; color: #1E1E1E; text-align: left; cursor: pointer; ' + (on ? 'background: #EFEFEF; font-weight: 500' : 'background: transparent');
+    const pages = [
+      { name: '/settings', kind: 'Live', dot: 'width: 6px; height: 6px; border-radius: 50%; background: #16A34A', style: pageStyle(route === 'settings'), pick: () => this.setState({ route: 'settings', sel: null }) },
+      { name: '/billing', kind: 'Live', dot: 'width: 6px; height: 6px; border-radius: 50%; background: #16A34A', style: pageStyle(route === 'billing'), pick: () => this.setState({ route: 'billing', sel: null }) }
+    ];
+    if (figma) pages.push({ name: 'Onboarding', kind: 'Design', dot: 'width: 6px; height: 6px; border-radius: 2px; background: ' + V, style: pageStyle(false), pick: () => this.setState({ sel: 'badge' }) });
+
+    // Components library
+    const openComp = (id) => this.setState({ view: 'components', compId: id, cvVariant: undefined, cvSize: undefined, pop: null, left: left === 'chat' ? 'chat' : 'library' });
+    const lib = {
+      Button: { file: 'src/components/Button/Button.tsx', storyFile: 'Button.stories.tsx', short: 'Button.tsx', desc: 'Primary action control. Use one primary button per view.', variants: ['primary', 'secondary', 'ghost', 'danger'].concat(E.extraVariant ? ['outline'] : []), sizes: ['sm', 'md', 'lg'], stories: ['Default', 'WithIcon', 'Loading', 'Disabled', 'FullWidth'].concat(E.extraVariant ? ['Outline'] : []).concat(E.extraStories ? ['LongLabel', 'RightToLeft'] : []), usage: [{ where: '/settings', count: 3 }, { where: '/billing', count: 3 }, { where: 'EmptyState', count: E.emptyState ? 1 : 0 }, { where: 'Card, Dialog', count: 4 }], impact: 'Affects 23 Button instances in 9 files. Every frame on the canvas follows.', figma: 'drift', label: 'Button' },
+      Card: { file: 'src/components/Card.tsx', storyFile: 'Card.stories.tsx', short: 'Card.tsx', desc: 'Groups related content and actions.', variants: ['outlined', 'elevated', 'ghost'], sizes: ['sm', 'md', 'lg'], stories: ['Default', 'WithAction', 'Elevated', 'Empty'], usage: [{ where: '/settings', count: 3 }, { where: '/billing', count: 3 }], impact: 'Affects 7 Card instances in 3 files.', figma: 'match', label: 'Card title' },
+      Input: { file: 'src/components/Input.tsx', storyFile: 'Input.stories.tsx', short: 'Input.tsx', desc: 'Single-line text field with label and help text.', variants: ['default', 'error'], sizes: ['sm', 'md'], stories: ['Default', 'WithError', 'Disabled'], usage: [{ where: '/settings/profile', count: 4 }], impact: 'Affects 11 Input instances in 4 files.', figma: 'match', label: 'Email' },
+      Avatar: { file: 'src/components/Avatar.tsx', storyFile: 'Avatar.stories.tsx', short: 'Avatar.tsx', desc: 'Shows a person as a photo or initials.', variants: ['image', 'initials'], sizes: ['sm', 'md', 'lg'], stories: ['Image', 'Initials'], usage: [{ where: 'Header', count: 1 }], impact: 'Affects 4 instances in 2 files.', figma: 'match', label: 'GL' },
+      Toggle: { file: 'src/components/Toggle.tsx', storyFile: 'Toggle.stories.tsx', short: 'Toggle.tsx', desc: 'On/off switch for a single setting.', variants: ['off', 'on'], sizes: ['sm', 'md'], stories: ['Off', 'On', 'Disabled'], usage: [{ where: '/settings', count: 6 }], impact: 'Affects 6 instances in 1 file.', figma: 'none', label: '' }
+    };
+    if (built) lib.PlanBadge = { file: 'src/components/PlanBadge/PlanBadge.tsx', storyFile: 'PlanBadge.stories.tsx', short: 'PlanBadge.tsx', desc: 'Highlights a plan. Built from the Figma library.', variants: ['popular', 'new', 'sale'], sizes: ['sm', 'md'], stories: ['Popular', 'New', 'Sale', 'Medium'], usage: [{ where: 'Onboarding (design)', count: 1 }], impact: 'Affects 1 instance.', figma: 'match', label: 'Popular' };
+    const compId = g('compId', 'Button');
+    const cid = lib[compId] ? compId : 'Button';
+    const C = lib[cid];
+    let cvVariant = g('cvVariant', C.variants[0]); if (C.variants.indexOf(cvVariant) < 0) cvVariant = C.variants[0];
+    let cvSize = g('cvSize', C.sizes[Math.min(1, C.sizes.length - 1)]); if (C.sizes.indexOf(cvSize) < 0) cvSize = C.sizes[0];
+    const cvLabel = g('cvLabel_' + cid, C.label);
+    const cvTheme = g('cvTheme', 'light'), cvState = g('cvState', 'default');
+    const cdk = cvTheme === 'dark';
+    const cink = cdk ? '#F4F4F5' : '#1E1E1E';
+    const lgH = E.driftFixed ? 44 : 40;
+    const render = (variant, size) => {
+      const s = cvState;
+      const fx = (s === 'hover' ? 'filter: brightness(0.92); ' : '') + (s === 'focus' ? 'box-shadow: 0 0 0 3px rgba(17,17,17,0.4); ' : '') + (s === 'disabled' ? 'opacity: 0.45; ' : '');
+      if (cid === 'Button') {
+        const h = { sm: 28, md: 34, lg: lgH }[size], fs = { sm: 11, md: 12, lg: 14 }[size], px = { sm: 10, md: 14, lg: 18 }[size];
+        const col = { primary: 'background: ' + brand + '; color: #fff; border: 1px solid ' + brand, secondary: 'background: ' + (cdk ? '#27272A' : '#fff') + '; color: ' + cink + '; border: 1px solid ' + (cdk ? '#3F3F46' : '#D4D4D8'), ghost: 'background: transparent; color: ' + brand + '; border: 1px solid transparent', danger: 'background: #DC2626; color: #fff; border: 1px solid #DC2626', outline: 'background: transparent; color: ' + brand + '; border: 1.5px solid ' + brand }[variant];
+        return { style: 'display: inline-flex; align-items: center; white-space: nowrap; height: ' + h + 'px; padding: 0 ' + px + 'px; border-radius: ' + btnR + '; font-size: ' + fs + 'px; font-weight: ' + E.weightTok + '; ' + col + '; ' + fx, text: cvLabel || 'Button' };
+      }
+      if (cid === 'Card') {
+        const p = { sm: 10, md: 16, lg: 20 }[size];
+        const v = { outlined: 'border: 1px solid ' + (cdk ? '#3F3F46' : '#E4E4E7') + '; background: ' + (cdk ? '#18181B' : '#fff'), elevated: 'border: 1px solid transparent; background: ' + (cdk ? '#27272A' : '#fff') + '; box-shadow: 0 4px 12px rgba(0,0,0,0.12)', ghost: 'border: 1px dashed ' + (cdk ? '#52525B' : '#D4D4D8') + '; background: transparent' }[variant];
+        return { style: 'display: block; width: 140px; text-align: left; padding: ' + p + 'px; border-radius: 8px; font-size: 12px; font-weight: 600; color: ' + cink + '; ' + v + '; ' + fx, text: cvLabel };
+      }
+      if (cid === 'Input') {
+        const h = size === 'sm' ? 28 : 34;
+        return { style: 'display: flex; align-items: center; width: 150px; height: ' + h + 'px; padding: 0 10px; border-radius: 6px; font-size: 12px; color: ' + (cdk ? '#A1A1AA' : '#6B6B6B') + '; background: ' + (cdk ? '#18181B' : '#fff') + '; border: 1px solid ' + (variant === 'error' ? '#DC2626' : (cdk ? '#3F3F46' : '#D4D4D8')) + '; ' + fx, text: cvLabel };
+      }
+      if (cid === 'Avatar') {
+        const d = { sm: 24, md: 32, lg: 40 }[size];
+        return { style: 'display: grid; place-items: center; width: ' + d + 'px; height: ' + d + 'px; border-radius: 50%; font-size: ' + Math.round(d / 2.6) + 'px; font-weight: 600; color: #fff; background: ' + (variant === 'image' ? 'linear-gradient(135deg, ' + brand + ', #A3A3A3)' : brand) + '; ' + fx, text: variant === 'image' ? '' : cvLabel };
+      }
+      if (cid === 'Toggle') {
+        const w = size === 'sm' ? 28 : 36, h = size === 'sm' ? 16 : 20, on = variant === 'on';
+        const track = on ? brand : (cdk ? '#3F3F46' : '#D4D4D8');
+        return { style: 'display: block; width: ' + w + 'px; height: ' + h + 'px; border-radius: 999px; background: radial-gradient(circle at ' + (on ? (w - h / 2) : h / 2) + 'px 50%, #fff ' + (h / 2 - 2) + 'px, ' + track + ' ' + (h / 2 - 1) + 'px); ' + fx, text: '' };
+      }
+      const bg = { popular: brand, new: '#0F766E', sale: '#B45309' }[variant];
+      return { style: 'display: inline-flex; align-items: center; height: ' + (size === 'sm' ? 20 : 24) + 'px; padding: 0 ' + (size === 'sm' ? 8 : 10) + 'px; border-radius: 999px; font-size: ' + (size === 'sm' ? 11 : 12) + 'px; font-weight: 600; color: #fff; background: ' + bg + '; ' + fx, text: cvLabel };
+    };
+    const gridCols = 'display: grid; grid-template-columns: 96px repeat(' + C.sizes.length + ', minmax(0, 1fr)); gap: 8px; align-items: center';
+    const matrix = C.variants.map((v) => ({
+      label: v, grid: gridCols,
+      cells: C.sizes.map((sz) => {
+        const r = render(v, sz), on = v === cvVariant && sz === cvSize;
+        return { style: r.style, text: r.text, aria: v + ' ' + sz, pick: () => this.setState({ cvVariant: v, cvSize: sz }), wrap: 'display: grid; place-items: center; min-height: 72px; border-radius: 8px; border: 0; cursor: pointer; background: ' + (cdk ? '#18181B' : '#FAFAFA') + '; ' + (on ? 'outline: 1.5px solid ' + V + '; outline-offset: -1px' : 'outline: 1px solid ' + (cdk ? '#27272A' : '#F0F0F0') + '; outline-offset: -1px') };
+      })
+    }));
+    const prev = render(cvVariant, cvSize);
+    const figOf = (k) => (lib[k].figma === 'drift' && E.driftFixed ? 'match' : lib[k].figma);
+    const compList = Object.keys(lib).map((k) => {
+      const f = figOf(k);
+      return {
+        name: k, stories: lib[k].stories.length,
+        dot: 'width: 6px; height: 6px; border-radius: 50%; background: ' + (f === 'match' ? '#16A34A' : (f === 'drift' ? '#D97706' : '#A1A1AA')),
+        figmaText: f === 'match' ? 'Matches Figma' : (f === 'drift' ? 'Differs from Figma' : 'Not in Figma'),
+        style: 'display: flex; align-items: center; gap: 6px; height: 28px; width: 100%; border: 0; border-radius: 5px; padding: 0 8px; font-size: 12px; color: #1E1E1E; text-align: left; cursor: pointer; ' + (k === cid && view === 'components' ? 'background: #EFEFEF; font-weight: 600' : 'background: transparent'),
+        pick: () => this.setState({ view: 'components', compId: k, cvVariant: undefined, cvSize: undefined })
+      };
+    });
+    const fs = figOf(cid);
+    const storyCount = Object.keys(lib).reduce((a, k) => a + lib[k].stories.length, 0) + 18;
+    const curStory = g('story', '');
+
+    // Chat
+    const chats = this.chats();
+    const chatIdx = Math.min(g('chatIdx', 0), chats.length - 1);
+    const aiChat = g('aiChat', 0);
+    const msgs = chats[chatIdx].msgs;
+    const chatMsgs = msgs.map((m, mi) => ({
+      isUser: m.role === 'user', isClaude: m.role === 'claude', text: m.text, meta: m.meta || '',
+      showSteps: m.status === 'running' && chatIdx === aiChat, isPlan: m.status === 'plan', plan: m.plan || [],
+      hasFiles: !!(m.files && m.files.length), files: m.files || [],
+      isReview: m.status === 'review', isKept: m.status === 'kept', isDiscarded: m.status === 'discarded', isRewound: m.status === 'rewound',
+      rewind: () => { if (!m.snap) return; this.commit(m.snap, 'Rewound to the checkpoint before this change.', 1); this.editChat(chatIdx, (arr) => { arr[mi] = Object.assign({}, arr[mi], { status: 'rewound' }); return arr; }); }
+    })).reverse();
+    const aiSteps = ai === 'planning' ? stepRows(['Reading the selection, files and CLAUDE.md', 'Writing a plan'], 1) : stepRows(['Reading the files and CLAUDE.md', 'Editing a scratch copy of the repo', 'Hooks: typecheck and lint', 'Reloading the live frame'], step);
+
+    const selCardName = RT.cards[cardIdx] ? RT.cards[cardIdx].t : '';
+    const ctxLabel = sel === 'card' ? 'Card · ' + selCardName : (sel === 'badge' ? 'PlanBadge' : (sel === 'item' && selIt ? selIt.name : (sel === 'frame' ? RT.title + ' frame' : (view === 'components' ? cid : 'No selection'))));
+    const suggestions = sel === 'badge'
+      ? [{ label: 'Build this component in code', go: () => this.runAI('Build this component in code') }]
+      : (sel === 'item' ? [{ label: 'Turn this into code', go: () => this.runAI('Turn this into code') }]
+        : [{ label: 'Make the cards denser', go: () => this.runAI('Make the cards denser') }, { label: 'Add an empty state', go: () => this.runAI('Add an empty state') }, { label: 'Try dark mode', go: () => this.runAI('Try dark mode') }, { label: 'Make the brand teal', go: () => this.runAI('Make the brand teal') }]);
+
+    const tools = {};
+    ['move', 'frame', 'rect', 'text', 'note'].forEach((n) => {
+      tools[n] = { style: 'width: 34px; height: 34px; border: 0; border-radius: 8px; display: grid; place-items: center; cursor: pointer; ' + (tool === n ? 'background: ' + V + '; color: #fff' : 'background: transparent; color: #1E1E1E'), pick: stop(() => this.setState({ tool: n })) };
+    });
+    const toolNames = { frame: 'Click the canvas to add a frame', rect: 'Click the canvas to add a shape', text: 'Click the canvas to add text', note: 'Click the canvas to pin a comment' };
+
+    // Canvas interaction
+    const canvasDown = (e) => {
+      const tgt = e.target;
+      if (!tgt || !tgt.getAttribute || tgt.getAttribute('data-bg') !== '1') return;
+      const r = e.currentTarget.getBoundingClientRect();
+      this._pan = { sx: e.clientX, sy: e.clientY, px: pan.x, py: pan.y, moved: false, rl: r.left, rt: r.top };
+    };
+    const canvasMove = (e) => {
+      if (this._drag) {
+        const d = this._drag, dx = (e.clientX - d.sx) / zoom, dy = (e.clientY - d.sy) / zoom;
+        if (Math.abs(dx) + Math.abs(dy) > 2) d.moved = true;
+        if (d.moved) this.setState({ items: this.st('items', []).map((x) => (x.id === d.id ? Object.assign({}, x, { x: Math.round(d.ox + dx), y: Math.round(d.oy + dy) }) : x)) });
+        return;
+      }
+      if (this._pan) {
+        const p = this._pan, dx = e.clientX - p.sx, dy = e.clientY - p.sy;
+        if (Math.abs(dx) + Math.abs(dy) > 3) p.moved = true;
+        if (p.moved && this.st('tool', 'move') === 'move') this.setState({ pan: { x: p.px + dx, y: p.py + dy } });
+      }
+    };
+    const canvasUp = (e) => {
+      if (this._drag) {
+        const d = this._drag; this._drag = null;
+        if (d.moved) { const undo = this.st('undo', []).concat([d.before]).slice(-40); this.setState({ undo: undo }); }
+        return;
+      }
+      if (this._pan) {
+        const p = this._pan; this._pan = null;
+        if (p.moved && this.st('tool', 'move') === 'move') return;
+        const t = this.st('tool', 'move');
+        if (t !== 'move') { this.addItem(t, (e.clientX - p.rl - pan.x) / zoom, (e.clientY - p.rt - pan.y) / zoom); return; }
+        this.setState({ sel: null, ai: this.st('ai', 'idle') === 'prompt' ? 'idle' : this.st('ai', 'idle') });
+      }
+    };
+    const zooms = [0.5, 0.75, 1, 1.25, 1.5];
+    const zi = zooms.indexOf(zoom);
+
+    // Pending / review
+    const reviewTitle = pending ? 'Claude changed ' + pending.files.length + ' file' + (pending.files.length > 1 ? 's' : '') : '';
+    const reviewSub = pending ? pending.summary : '';
+    const changedSummaries = [];
+    chats.forEach((c) => c.msgs.forEach((m) => { if (m.status === 'kept') changedSummaries.push(m.text.replace(/\.$/, '')); }));
+    if (built) changedSummaries.push('PlanBadge built from the Figma library with 6 variants and stories');
+    if (!changedSummaries.length) changedSummaries.push('Direct edits made on the canvas and in Components');
+
+    const branchSlug = vname.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'my-version';
+    const versions = g('versions', []);
+    const claudeStatus = ai === 'running' ? 'Claude is editing' : (ai === 'planning' ? 'Claude is planning' : (ai === 'plan' ? 'Waiting for you to approve the plan' : (ai === 'review' ? 'Waiting for you to keep or discard' : (modal === 'build' && bstep === 'building' ? 'Claude is building PlanBadge' : (pulling ? 'Getting latest…' : (src === 'local' ? 'Claude Code (local)' : 'Claude (API key)') + ' · ' + modelName + ' · ' + effort + ' · ' + modeObj.name)))));
+    const imp = { a: g('impA', true), b: g('impB', true), c: g('impC', true) };
+    const impSrc = g('impSrc', 'mcp');
+    const impN = (imp.a ? 1 : 0) + (imp.b ? 1 : 0) + (imp.c ? 1 : 0);
+
+    const codeText = sel === 'badge'
+      ? (built ? 'export function PlanBadge({\n  ' + g('propV', 'variant') + ' = "popular",\n  ' + g('propS', 'size') + ' = "sm",\n  children,\n}) {\n  return <span className={badge({ ' + g('propV', 'variant') + ', ' + g('propS', 'size') + ' })}>\n    {children}\n  </span>;\n}' : '// Not in code yet.\n// Choose "Build in code".')
+      : (sel === 'item' && selIt ? (selIt.code ? '<' + selIt.name.replace(/[^A-Za-z0-9]/g, '') + ' />\n// src/components/' + selIt.name.replace(/[^A-Za-z0-9]/g, '') + '.tsx' : '// ' + selIt.name + ' is a design layer.\n// x ' + selIt.x + ', y ' + selIt.y + (selIt.w ? ', ' + selIt.w + ' × ' + selIt.h : '') + '\n// Turn it into code with Claude.')
+      : '<Stack gap="' + E.gapTok + '">\n' + RT.cards.map((c, i) => '  <Card variant="' + E.cardVar[i] + '" size="' + E.cardSize[i] + '"\n        padding="' + E.pads[i] + '">\n    <Card.Title>' + c.t + '</Card.Title>\n    <Button size="sm">Edit</Button>\n  </Card>').join('\n') + (E.emptyState && route === 'settings' ? '\n  <EmptyState />' : '') + '\n</Stack>');
+
+    const scopeApply = (key, val) => {
+      const cur = D[key].slice();
+      if (scope === 'all') for (let i = 0; i < cur.length; i++) cur[i] = val; else cur[cardIdx] = val;
+      const o = {}; o[key] = cur;
+      this.commit(o, scope === 'all' ? 'Card.tsx updated. All cards follow.' : 'Updated this card in ' + RT.file.split('/').slice(-2).join('/') + '.');
+    };
+
+    return {
+      // shell
+      isCanvas: view === 'canvas', isComponents: view === 'components',
+      viewTabs: { canvas: viewSeg(view === 'canvas'), components: viewSeg(view === 'components') },
+      viewCanvas: () => this.setState({ view: 'canvas', pop: null, left: left === 'library' ? 'layers' : left }),
+      viewComponents: () => this.setState({ view: 'components', pop: null, left: left === 'chat' ? 'chat' : 'library' }),
+      leftTabs: (view === 'canvas' ? [['layers', 'Layers'], ['assets', 'Assets'], ['chat', 'Chat']] : [['library', 'Library'], ['chat', 'Chat']]).map((x) => ({ label: x[1], style: pill(left === x[0] || (x[0] === 'library' && left !== 'chat' && view === 'components') || (x[0] === 'layers' && left === 'library' && view === 'canvas')), pick: () => this.setState({ left: x[0] }), dot: x[0] === 'chat' && left !== 'chat' && ai !== 'idle' && ai !== 'prompt' })),
+      leftIs: { layers: view === 'canvas' && (left === 'layers' || left === 'library'), assets: view === 'canvas' && left === 'assets', library: view === 'components' && left !== 'chat', chat: left === 'chat' },
+      repoName: repoName, vname: vname, branchSlug: branchSlug,
+      repoChip: chipBtn(pop === 'repo'), claudeChip: chipBtn(pop === 'claude') + '; border: 1px solid #E6E6E6',
+      togRepo: () => this.setState({ pop: pop === 'repo' ? null : 'repo' }), togClaude: () => this.setState({ pop: pop === 'claude' ? null : 'claude' }),
+      popOpen: !!pop, popRepo: pop === 'repo', popClaude: pop === 'claude', closePop: () => this.setState({ pop: null }),
+      doUndo: () => this.doUndoNow(),
+      devText: dev === 'running' ? 'dev server running on :5173' : 'starting dev server…',
+      devDot: 'width: 6px; height: 6px; border-radius: 50%; background: ' + (dev === 'running' ? '#16A34A' : '#D97706'),
+      storyCount: storyCount,
+
+      // claude
+      srcStatus: src === 'local' ? 'Claude Code found · signed in' : 'API key saved',
+      srcShort: src === 'local' ? 'Local Claude Code' : 'API key',
+      srcStyles: { local: srcBtn(src === 'local'), api: srcBtn(src === 'api') },
+      srcLocal: () => this.setState({ src: 'local' }), srcApi: () => this.setState({ src: 'api' }),
+      model: model, modelName: modelName, modelList: models, setModel: (e) => this.setState({ model: e.target.value }),
+      modelRows: models.map((m) => ({ name: m.name, note: m.note, style: rowBtn(m.id === model), radio: radio(m.id === model), pick: () => this.setState({ model: m.id }) })),
+      effort: effort, effortList: efforts, setEffort: (e) => this.setState({ effort: e.target.value }),
+      effortTabs: efforts.map((x) => ({ label: x, style: seg(x === effort), pick: () => this.setState({ effort: x }) })),
+      mode: mode, modeShort: modeObj.short, modeList: modes, setMode: (e) => this.setState({ mode: e.target.value }),
+      modeRows: modes.map((m) => ({ name: m.name, note: m.note, style: rowBtn(m.id === mode), radio: radio(m.id === mode), pick: () => this.setState({ mode: m.id }) })),
+      chatRows: chats.map((c, i) => ({ name: c.name, count: c.msgs.length + ' messages', resume: () => this.setState({ chatIdx: i, left: 'chat', pop: null }) })),
+
+      // chat
+      chatIdx: String(chatIdx), chatOptions: chats.map((c, i) => ({ value: String(i), name: c.name })),
+      pickChat: (e) => this.setState({ chatIdx: parseInt(e.target.value, 10) }),
+      newChat: () => { const cs = chats.concat([{ name: 'Chat ' + (chats.length + 1), msgs: [] }]); this.setState({ chats: cs, chatIdx: cs.length - 1, left: 'chat' }); },
+      chatMsgs: chatMsgs, chatEmpty: msgs.length === 0, aiSteps: aiSteps,
+      chatInput: g('chatInput', ''), typeChat: (e) => this.setState({ chatInput: e.target.value }),
+      submitChat: (e) => { if (e && e.preventDefault) e.preventDefault(); this.runAI(this.st('chatInput', '')); },
+      ctxLabel: ctxLabel,
+      approvePlan: () => this.startEdits(aiChat),
+      keepAI: () => this.applyPending(), discardAI: () => this.discardPending(),
+      toggleBefore: () => this.setState({ before: !before }), beforeLabel: before ? 'Show after' : 'Show before',
+
+      // floating AI
+      openAI: stop(() => { if (ai !== 'idle' && ai !== 'prompt') { this.setState({ left: 'chat' }); return; } this.setState({ ai: ai === 'prompt' ? 'idle' : 'prompt', prompt: '' }); }),
+      closeAI: () => this.setState({ ai: 'idle' }),
+      aiPrompt: ai === 'prompt', aiBusy: ai === 'running' || ai === 'planning' || ai === 'plan', aiReview: ai === 'review',
+      busyText: ai === 'plan' ? 'Plan ready. Approve it in the Chat tab.' : (ai === 'planning' ? 'Claude is planning…' : 'Claude is editing…'),
+      prompt: g('prompt', ''), typePrompt: (e) => this.setState({ prompt: e.target.value }),
+      submitQuick: (e) => { if (e && e.preventDefault) e.preventDefault(); this.runAI(this.st('prompt', '')); },
+      suggestions: suggestions,
+      aiBtnStyle: 'height: 34px; padding: 0 12px 0 10px; border: 0; border-radius: 8px; display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 12px; font-weight: 600; ' + (ai !== 'idle' ? 'background: ' + V + '; color: #fff' : 'background: #EFEFEF; color: #111111'),
+      reviewTitle: reviewTitle, reviewSub: reviewSub,
+      cmp: { before: segDark(before), after: segDark(!before) },
+      showBefore: () => this.setState({ before: true }), showAfter: () => this.setState({ before: false }),
+
+      // canvas
+      canvasStyle: 'position: relative; flex: 1; min-width: 0; overflow: hidden; background: #F0F0F2; cursor: ' + (tool === 'move' ? 'default' : 'crosshair'),
+      worldStyle: 'position: absolute; left: 0; top: 0; width: 4000px; height: 3000px; transform-origin: 0 0; transform: translate(' + pan.x + 'px, ' + pan.y + 'px) scale(' + zoom + ')',
+      canvasDown: canvasDown, canvasMove: canvasMove, canvasUp: canvasUp, canvasLeave: () => { this._pan = null; this._drag = null; },
+      zoomLabel: Math.round(zoom * 100) + '%',
+      zoomIn: () => this.setState({ zoom: zooms[Math.min(zooms.length - 1, zi + 1)] }), zoomOut: () => this.setState({ zoom: zooms[Math.max(0, zi - 1)] }),
+      zoomReset: () => this.setState({ zoom: 1, pan: { x: 0, y: 0 } }),
+      toolHint: tool !== 'move', toolHintText: toolNames[tool] || '',
+      tools: tools, items: itemsV,
+      route: RT, frameW: String(D.frameW),
+      liveFramePos: 'position: absolute; left: 48px; top: 56px; width: ' + E.frameW + 'px; transition: width .25s ease',
+      liveFrameStyle: 'position: relative; background: ' + (dk ? '#09090B' : '#FAFAFA') + '; color: ' + ink + '; border-radius: 2px; box-shadow: 0 0 0 1px rgba(0,0,0,0.06), 0 1px 3px rgba(0,0,0,0.06); padding: 0 0 24px;' + (sel === 'frame' ? ' outline: 1.5px solid ' + V + ';' : ''),
+      frameLabelStyle: 'font-weight: 500; color: ' + (sel === 'frame' ? V : '#1E1E1E'),
+      pickFrame: pickFrame, live: live, cards: cards,
+      cardListStyle: 'display: flex; flex-direction: column; gap: ' + SP[E.gapTok] + 'px; transition: gap .25s ease',
+      showEmpty: E.emptyState && route === 'settings',
+      designFramePos: 'position: absolute; left: ' + (48 + E.frameW + 60) + 'px; top: 56px; width: 400px',
+      importSlotStyle: 'position: absolute; left: ' + (48 + E.frameW + 60) + 'px; top: 80px; width: 400px; height: 300px; border: 1.5px dashed #C9C9CF; border-radius: 8px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; text-align: center; color: #6B6B6B',
+      figma: figma, noFigma: !figma, built: built, notBuilt: !built,
+      planBtn: 'margin-top: 4px; height: 30px; display: flex; align-items: center; justify-content: center; border: 1px solid #D4D4D8; border-radius: ' + btnR + '; font-size: 12px; font-weight: ' + E.weightTok,
+      planBtnPrimary: 'margin-top: 4px; height: 30px; display: flex; align-items: center; justify-content: center; border-radius: ' + btnR + '; font-size: 12px; font-weight: 600; color: #fff; background: ' + brand,
+      proCard: 'border: 1.5px solid ' + brand + '; border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 8px',
+      badgeStyle: 'display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 999px; font-size: 11px; font-weight: 600; color: #fff; background: ' + brand + '; cursor: pointer;' + (sel === 'badge' ? ' outline: 1.5px solid ' + V + '; outline-offset: 3px;' : (built ? '' : ' outline: 1px dashed #D97706; outline-offset: 3px;')),
+      badgeTagStyle: 'position: absolute; right: 12px; top: -11px; font-size: 10px; font-weight: 600; padding: 2px 6px; border-radius: 4px; ' + (built ? 'color: #065F46; background: #D1FAE5' : 'color: #92400E; background: #FEF3C7'),
+      badgeTag: built ? 'PlanBadge.tsx · in code' : 'PlanBadge · not in code',
+      pickBadge: stop(() => this.setState({ sel: 'badge', tab: 'design' })),
+      swallow: (e) => { if (e && e.stopPropagation) e.stopPropagation(); },
+      layers: layers, pages: pages,
+      assets: ['Button', 'Card', 'Input', 'Avatar', 'Toggle'].concat(built ? ['PlanBadge'] : []).map((k) => ({
+        name: k, preview: { Button: 'Button', Input: 'Email', PlanBadge: 'Popular' }[k] || '', open: () => openComp(k),
+        thumb: { Button: 'font-size: 10px; padding: 4px 10px; border-radius: ' + btnR + '; background: ' + brand + '; color: #fff', Card: 'width: 64px; height: 30px; border: 1px solid #D4D4D8; border-radius: 5px; background: #fff', Input: 'font-size: 10px; color: #6B6B6B; width: 64px; padding: 4px 6px; border: 1px solid #D4D4D8; border-radius: 4px; background: #fff', Avatar: 'width: 26px; height: 26px; border-radius: 50%; background: ' + brand, Toggle: 'width: 30px; height: 16px; border-radius: 8px; background: ' + brand, PlanBadge: 'font-size: 10px; font-weight: 600; color: #fff; background: ' + brand + '; padding: 2px 8px; border-radius: 999px' }[k]
+      })),
+
+      // right panel
+      tabs: { design: pill(tab === 'design'), tokens: pill(tab === 'tokens'), code: pill(tab === 'code') },
+      tabDesign: () => this.setState({ tab: 'design' }), tabTokens: () => this.setState({ tab: 'tokens' }), tabCode: () => this.setState({ tab: 'code' }),
+      showCardDesign: tab === 'design' && sel === 'card', showBadgeDesign: tab === 'design' && sel === 'badge', showFrameDesign: tab === 'design' && sel === 'frame',
+      showItemDesign: tab === 'design' && sel === 'item' && !!selIt, showPageDesign: tab === 'design' && (!sel || (sel === 'item' && !selIt)),
+      showTokens: tab === 'tokens', showCode: tab === 'code',
+      selCardName: selCardName, selCardVar: D.cardVar[cardIdx], selCardSize: D.cardSize[cardIdx], selCardPad: D.pads[cardIdx], gapTok: D.gapTok,
+      setCardVar: (e) => scopeApply('cardVar', e.target.value), setCardSize: (e) => scopeApply('cardSize', e.target.value), setCardPad: (e) => scopeApply('pads', e.target.value),
+      setGap: (e) => this.commit({ gapTok: e.target.value }, 'List gap updated in ' + RT.file.split('/').slice(-2).join('/') + '.'),
+      scopes: { one: seg(scope === 'one'), all: seg(scope === 'all') },
+      scopeOne: () => this.setState({ scope: 'one' }), scopeAll: () => this.setState({ scope: 'all' }),
+      scopeNote: scope === 'all' ? 'Edits the main Card component (Card.tsx). Every card follows.' : 'Edits only this card\'s props in ' + RT.file.split('/').pop() + '.',
+      openCardComp: () => openComp('Card'), openBadgeComp: () => openComp('PlanBadge'),
+      setFrameW: (e) => this.commit({ frameW: parseInt(e.target.value, 10) }, null, 0),
+      liveThemeTabs: { light: seg(!dk), dark: seg(dk) },
+      setLight: () => this.commit({ liveTheme: 'light' }, 'Light mode.', 0), setDark: () => this.commit({ liveTheme: 'dark' }, 'Dark mode: every live frame now uses the dark tokens.', 0),
+      selItem: selItem,
+      setItemX: (e) => this.updItem({ x: parseInt(e.target.value || '0', 10) }, true), setItemY: (e) => this.updItem({ y: parseInt(e.target.value || '0', 10) }, true),
+      setItemW: (e) => this.updItem({ w: Math.max(8, parseInt(e.target.value || '8', 10)) }, true), setItemH: (e) => this.updItem({ h: Math.max(8, parseInt(e.target.value || '8', 10)) }, true),
+      setItemFill: (e) => this.updItem({ fill: e.target.value }, true), setItemText: (e) => this.updItem({ text: e.target.value }, false),
+      deleteItem: () => { const id = g('selItem', null); this.commit({ items: D.items.filter((x) => x.id !== id), sel: null }, 'Deleted.', 0); },
+      itemToCode: () => this.runAI('Turn this into code'),
+      badgePanelPill: 'margin-left: auto; font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 4px; ' + (built ? 'color: #065F46; background: #D1FAE5' : 'color: #92400E; background: #FEF3C7'),
+      badgePanelPillText: built ? 'In code' : 'Not in code',
+      badgeSource: built ? 'src/components/PlanBadge/PlanBadge.tsx' : 'Figma component · Acme Library',
+      figmaStatus: (impSrc === 'mcp' ? 'Figma desktop MCP · ' : (impSrc === 'oauth' ? 'Figma sign-in · ' : 'Figma token · ')) + (figma ? 'Onboarding imported · variables in sync' : 'connected · nothing imported yet'),
+      brand: D.brand, setBrand: (e) => this.commit({ brand: e.target.value.toUpperCase() }, null, 1),
+      brandSwatch: 'width: 10px; height: 10px; border-radius: 2px; background: ' + brand,
+      tokens: [
+        { name: 'color.surface.card', val: dk ? '18181B' : 'FFFFFF', sw: 'width: 14px; height: 14px; border-radius: 3px; background: ' + (dk ? '#18181B' : '#fff') + '; box-shadow: inset 0 0 0 1px #D4D4D8' },
+        { name: 'space.2 / 3 / 4 / 5', val: '8 / 12 / 16 / 20', sw: 'width: 14px; height: 14px; border-radius: 3px; background: #F2F2F3' },
+        { name: 'radius.md', val: '6', sw: 'width: 14px; height: 14px; border-radius: 3px; background: #F2F2F3' },
+        { name: 'radius.lg', val: figma && imp.c ? '16' : '12', sw: 'width: 14px; height: 14px; border-radius: 3px; background: #F2F2F3' }
+      ].concat(figma && imp.a ? [{ name: 'color.badge.popular', val: 'brand', sw: 'width: 14px; height: 14px; border-radius: 3px; background: ' + brand }] : []),
+      syncBox: 'border-radius: 8px; padding: 10px; line-height: 1.5; ' + (figma ? 'background: #ECFDF5; color: #065F46' : 'background: #FFFBEB; color: #78350F'),
+      syncText: figma ? 'In sync with Figma variables.' : 'Figma has 3 variable changes. Import from Figma to review them.',
+      codeFile: sel === 'badge' ? (built ? 'src/components/PlanBadge/PlanBadge.tsx' : 'PlanBadge') : (sel === 'item' ? 'Design layer' : RT.file),
+      codeText: codeText,
+
+      // components view
+      comp: {
+        name: cid, file: C.file, storyFile: C.storyFile, short: C.short, desc: C.desc, variants: C.variants, sizes: C.sizes, usage: C.usage.filter((u) => u.count > 0), impact: C.impact,
+        axis: C.variants.length + ' variants × ' + C.sizes.length + ' sizes, read from the story args',
+        drift: fs === 'drift',
+        figmaNote: fs === 'drift' ? 'Linked to Button in Acme Library. 1 difference: size lg is 44 px tall in Figma, 40 px in code.' : (fs === 'match' ? 'Linked to the Figma library. All variants match.' : 'Not in Figma yet.'),
+        figmaBox: 'padding: 8px 10px; border-radius: 8px; font-size: 12px; ' + (fs === 'drift' ? 'background: #FFFBEB; color: #78350F' : (fs === 'match' ? 'background: #ECFDF5; color: #065F46' : 'background: #F4F4F5; color: #3F3F46'))
+      },
+      compList: compList, matrix: matrix, colHeads: C.sizes,
+      gridHead: gridCols + '; margin-bottom: 8px',
+      headStyle: 'font-size: 11px; font-weight: 600; color: ' + (cdk ? '#A1A1AA' : '#6B6B6B') + '; text-align: center',
+      matrixBg: 'padding: 16px; display: flex; flex-direction: column; gap: 8px; background: ' + (cdk ? '#09090B' : '#fff'),
+      themeTabs: { light: seg(!cdk), dark: seg(cdk) },
+      themeLight: () => this.setState({ cvTheme: 'light' }), themeDark: () => this.setState({ cvTheme: 'dark' }),
+      stateTabs: ['default', 'hover', 'focus', 'disabled'].map((x) => ({ label: x, style: seg(cvState === x), pick: () => this.setState({ cvState: x }) })),
+      storyChips: C.stories.map((n) => ({ name: n, style: 'height: 26px; padding: 0 10px; border-radius: 13px; font-size: 11px; cursor: pointer; ' + (curStory === n ? 'border: 1px solid ' + V + '; background: #EFEFEF; color: #111111; font-weight: 600' : 'border: 1px solid #E6E6E6; background: #fff; color: #1E1E1E'), pick: () => { const o = { story: n, cvState: n === 'Disabled' ? 'disabled' : 'default' }; if (n === 'Outline') o.cvVariant = 'outline'; if (n === 'LongLabel') o['cvLabel_' + cid] = 'Save and continue to billing'; this.setState(o); } })),
+      cvVariant: cvVariant, cvSize: cvSize, cvLabel: cvLabel,
+      setCvVariant: (e) => this.setState({ cvVariant: e.target.value }), setCvSize: (e) => this.setState({ cvSize: e.target.value }),
+      setCvLabel: (e) => { const o = {}; o['cvLabel_' + cid] = e.target.value; this.setState(o); },
+      previewBox: 'margin: 10px 0 8px; min-height: 64px; border-radius: 8px; display: grid; place-items: center; background: ' + (cdk ? '#18181B' : '#FAFAFA') + '; outline: 1px solid ' + (cdk ? '#27272A' : '#F0F0F0'),
+      previewStyle: prev.style, previewText: prev.text,
+      radTok: D.radTok, weightTok: D.weightTok,
+      setRad: (e) => this.commit({ radTok: e.target.value }, C.short + ': radius.' + e.target.value + '. Every instance on the canvas follows.'),
+      setWeight: (e) => this.commit({ weightTok: e.target.value }, C.short + ': font weight updated. Every instance follows.'),
+      fixDrift: () => this.commit({ driftFixed: true }, 'Button.tsx: size lg is now 44 px, matching Figma.'),
+      pushDrift: () => { this.setState({ driftFixed: true }); this.say('Sent to Figma: the library Button lg becomes 40 px to match code. Someone approves it in Figma.'); },
+      compAI: {
+        variant: () => this.runAI('Add an outline variant to ' + cid),
+        stories: () => this.runAI('Write missing stories for ' + cid),
+        canvas: () => this.setState({ view: 'canvas', left: left === 'chat' ? 'chat' : 'layers' })
+      },
+
+      // git and project
+      hasToast: !!toast, toast: toast,
+      changes: changes, hasChanges: changes > 0,
+      changesText: changes > 0 ? changes + ' unsaved change' + (changes > 1 ? 's' : '') : (versions.length ? 'All changes saved' : 'No changes yet'),
+      claudeStatus: claudeStatus,
+      showLatestBadge: !pulled && !pulling,
+      latestLabel: pulling ? 'Getting latest…' : 'Get latest',
+      getLatest: () => {
+        if (pulling) return;
+        if (pulled) { this.say('You already have the latest from main.'); return; }
+        this.setState({ pulling: true });
+        this.later(1500, () => { this.setState({ pulling: false, pulled: true, radTok: 'full' }); this.say('Up to date. Sam rounded Button in Button.tsx; every frame and the Components view show it.'); });
+      },
+      shareLabel: pr ? 'In review' : 'Share for review',
+      versions: versions.map((v) => ({ name: v.name, time: v.time, restore: () => { this.commit(v.snap, 'Restored “' + v.name + '”.', 1); this.setState({ pop: null }); } })),
+      noVersions: versions.length === 0,
+      recents: [{ path: '~/code/acme-mobile' }, { path: '~/code/marketing-site' }].map((r) => ({ path: r.path, open: () => this.setState({ modal: 'trust', trustPath: r.path, pop: null }) })),
+      openClone: () => this.setState({ modal: 'clone', pop: null }),
+      trustPath: g('trustPath', ''),
+      doTrust: () => { const p = g('trustPath', '~/code/x'); this.setState({ modal: null, repoName: p.split('/').pop(), dev: 'starting' }); this.say('Opened ' + p + '. Installing packages and starting the dev server…'); this.later(1800, () => this.setState({ dev: 'running' })); },
+      cloneUrl: g('cloneUrl', ''), typeClone: (e) => this.setState({ cloneUrl: e.target.value }),
+      doClone: (e) => { if (e && e.preventDefault) e.preventDefault(); const u = (this.st('cloneUrl', '') || '').trim(); if (!u) { this.say('Type owner/repo first.'); return; } this.setState({ modal: 'trust', trustPath: '~/code/' + u.split('/').pop() }); },
+
+      modalOpen: !!modal, mImport: modal === 'import', mBuild: modal === 'build', mSave: modal === 'save', mShare: modal === 'share', mTrust: modal === 'trust', mClone: modal === 'clone',
+      closeModal: () => this.setState({ modal: null, bstep: modal === 'build' && bstep !== 'compare' ? bstep : 'plan' }),
+      openImport: stop(() => this.setState({ modal: 'import' })),
+      imp: { sources: [
+          { id: 'mcp', name: 'Figma desktop app (MCP)', rec: true, note: 'No token. Reads what you have selected while Figma desktop is open.' },
+          { id: 'oauth', name: 'Sign in to Figma', rec: false, note: 'Pick any file by link, even when the desktop app is closed.' },
+          { id: 'token', name: 'Personal access token', rec: false, note: 'Fallback for read-only access by file link.' }
+        ].map((s) => ({ name: s.name, rec: s.rec, note: s.note, style: rowBtn(impSrc === s.id) + '; align-items: flex-start', radio: radio(impSrc === s.id), pick: () => this.setState({ impSrc: s.id }) })),
+        pageTitle: impSrc === 'mcp' ? 'Your selection in Figma desktop' : 'Page to bring in as design frames',
+        from: impSrc === 'mcp' ? 'selected in Figma desktop' : 'Acme Product · Library and flows',
+        a: imp.a, b: imp.b, c: imp.c, togA: () => this.setState({ impA: !imp.a }), togB: () => this.setState({ impB: !imp.b }), togC: () => this.setState({ impC: !imp.c }), label: 'Import 1 page' + (impN ? ' and ' + impN + ' token change' + (impN > 1 ? 's' : '') : '') },
+      doImport: () => { this.commit({ figma: true, sel: 'badge', tab: 'design', modal: null }, 'Imported Onboarding as a design frame' + (impN ? ' and ' + impN + ' token changes' : '') + '. PlanBadge is not in your code yet.', impN); },
+      openBuild: () => this.setState({ modal: 'build', bstep: 'plan' }),
+      propV: g('propV', 'variant'), propS: g('propS', 'size'), setPropV: (e) => this.setState({ propV: e.target.value }), setPropS: (e) => this.setState({ propS: e.target.value }),
+      bPlan: bstep === 'plan', bBuilding: bstep === 'building', bCompare: bstep === 'compare',
+      buildStepLabel: bstep === 'plan' ? 'Step 1 of 3 · Plan' : (bstep === 'building' ? 'Step 2 of 3 · Building' : 'Step 3 of 3 · Compare'),
+      runBuild: stop(() => { this.setState({ bstep: 'building', bprog: 0 }); [1, 2, 3, 4].forEach((n) => this.later(800 * n, () => this.setState(n < 4 ? { bprog: n } : { bstep: 'compare', bprog: 4 }))); }),
+      buildSteps: stepRows(['Writing PlanBadge.tsx', 'Adding badge tokens to tokens.json', 'Subagents writing stories for 6 variants', 'Rendering and comparing with Figma'], bprog),
+      variants: [['Popular', brand, '99.4%'], ['New', '#0F766E', '99.1%'], ['Sale', '#B45309', '98.7%']].map((x) => ({ name: x[0], match: x[2], chip: 'display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 999px; font-size: 11px; font-weight: 600; color: #fff; background: ' + x[1] })),
+      keepBuild: () => { this.setState({ modal: null, bstep: 'plan', built: true, changes: changes + 3 }); this.pushMsgs(chatIdx, [{ role: 'claude', meta: this.meta(), status: 'kept', text: 'Built PlanBadge from the Figma component set and linked it with Code Connect.', files: ['PlanBadge.tsx', 'PlanBadge.stories.tsx', 'tokens.json'] }]); this.say('PlanBadge is now a real component. Find it in Assets and Components.'); },
+      openSave: () => { if (changes === 0) { this.say('Nothing to save yet. Make a change first.'); return; } this.setState({ modal: 'save', vdraft: vname }); },
+      vdraft: g('vdraft', vname), typeVname: (e) => this.setState({ vdraft: e.target.value }),
+      saveSummary: changes + ' change' + (changes > 1 ? 's' : '') + ' will be saved to your version history and backed up to GitHub.',
+      doSave: (e) => { if (e && e.preventDefault) e.preventDefault(); const nm = (this.st('vdraft', vname) || vname).trim() || vname; const t = new Date(); const time = String(t.getHours()).padStart(2, '0') + ':' + String(t.getMinutes()).padStart(2, '0'); this.setState({ modal: null, changes: 0, vname: nm, versions: [{ name: nm, time: time, snap: this.design() }].concat(versions) }); this.say('Saved “' + nm + '” and pushed it to GitHub.'); },
+      openShare: () => { if (pr) { this.say('Already in review. Developers have the pull request.'); return; } if (!versions.length && changes === 0) { this.say('Make and save a change first, then share it.'); return; } this.setState({ modal: 'share' }); },
+      shareLines: changedSummaries,
+      doShare: () => { this.setState({ modal: null, pr: true, changes: 0 }); this.say('Sent for review. Developers got a pull request with before and after screenshots.'); }
+    };
+  }
+}
+</script>
+</body>
+</html>
