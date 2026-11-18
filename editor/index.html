@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Designer canvas</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,100..900;1,100..900&family=Roboto:ital,wght@0,100..900;1,100..900&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <button id="main-menu" class="logo" aria-label="Main menu" title="Main menu">
+      <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true"><rect width="22" height="22" rx="6" fill="#111111"/><rect x="5" y="5" width="7" height="7" rx="1.5" fill="#FFFFFF"/><circle cx="13.5" cy="13.5" r="4" fill="none" stroke="#FFFFFF" stroke-width="1.6"/></svg>
+      <svg width="8" height="8" viewBox="0 0 8 8" aria-hidden="true"><path d="M1.5 3l2.5 2.5L6.5 3" fill="none" stroke="currentColor" stroke-width="1.2"/></svg>
+    </button>
+    <input id="file-name" class="file-name" aria-label="File name" spellcheck="false">
+    <span class="page-name">Page 1</span>
+    <div class="spacer"></div>
+    <button id="undo" class="icon-btn" aria-label="Undo" title="Undo (Ctrl/⌘ Z)"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M5.5 3L2.5 6l3 3M2.5 6H10a3.5 3.5 0 0 1 0 7H7"/></svg></button>
+    <button id="redo" class="icon-btn" aria-label="Redo" title="Redo (Shift Ctrl/⌘ Z)"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M10.5 3l3 3-3 3M13.5 6H6a3.5 3.5 0 0 0 0 7h3"/></svg></button>
+    <button id="help" class="icon-btn" aria-label="Keyboard shortcuts" title="Keyboard shortcuts (Shift ?)"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><rect x="1.5" y="4" width="13" height="8" rx="1.5"/><path d="M4 6.5h.5M6.5 6.5H7M9 6.5h.5M11.5 6.5h.5M4.5 9.5h7"/></svg></button>
+    <button id="zoom" class="zoom-btn" aria-label="Zoom" title="Zoom">100%</button>
+  </header>
+  <div class="body">
+    <aside class="panel left">
+      <div class="panel-title">Layers</div>
+      <div id="layers"></div>
+    </aside>
+    <main class="stage">
+      <div id="canvas"></div>
+      <div id="toolbar"></div>
+    </main>
+    <aside class="panel right" id="props"></aside>
+  </div>
+</div>
+<script type="module" src="src/main.js"></script>
+</body>
+</html>
