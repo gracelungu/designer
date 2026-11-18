@@ -85,6 +85,7 @@ describe.skipIf(!browserPath || !existsSync(join(web, 'index.html')))('smoke: vi
   };
 
   it('takes before and after pictures when Claude changes a component', async () => {
+    await page.getByRole('button', { name: 'Agent', exact: true }).click();
     const box = page.locator('textarea');
     await box.waitFor({ timeout: 20000 });
     // Wait until Claude Code has started and reported its models (the model menu turns on).
@@ -95,7 +96,7 @@ describe.skipIf(!browserPath || !existsSync(join(web, 'index.html')))('smoke: vi
     await page.getByText(/Visual review ready: 1 of 1 view changed/).waitFor({ timeout: 30000 });
     expect(readFileSync(join(repo.dir, 'src', 'Button.css'), 'utf8')).toBe('blue\n');
 
-    await page.getByRole('tab', { name: /Code/ }).click();
+    await page.getByRole('tab', { name: /Inspect/ }).click();
     const card = page.getByTestId('review-card').first();
     await card.waitFor();
     await expect(card.textContent()).resolves.toMatch(/blue.*1 of 1 view changed/);
@@ -139,7 +140,7 @@ describe.skipIf(!browserPath || !existsSync(join(web, 'index.html')))('smoke: vi
   }, 60000);
 
   it('shows version history and makes a variation without git words', async () => {
-    await page.getByRole('button', { name: 'Versions', exact: true }).click();
+    await page.getByRole('button', { name: 'History', exact: true }).click();
     const first = page.getByTestId('version').first();
     await first.waitFor();
     await expect(first.textContent()).resolves.toContain('Make the buy button blue');

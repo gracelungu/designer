@@ -23,6 +23,7 @@ async function openPage(url: string, init?: () => void) {
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   if (init) await ctx.addInitScript(init);
   const p = await ctx.newPage();
+  p.setDefaultTimeout(9000);
   p.on('pageerror', (e) => errors.push(e.message));
   await p.goto(url);
   return p;
@@ -90,7 +91,7 @@ describe('first run onboarding', () => {
 
 describe('chat with Claude Code', () => {
   it('lists Claude Code’s commands and MCP servers', async () => {
-    await page.getByRole('button', { name: 'Chat', exact: true }).click();
+    await page.getByRole('button', { name: 'Agent', exact: true }).click();
     await page.getByRole('button', { name: 'Claude Code settings' }).click();
     await page.getByText('MCP servers (1)').waitFor();
     await page.getByText('my-skill').first().waitFor();
@@ -109,7 +110,7 @@ describe('chat with Claude Code', () => {
   });
 
   it('shows what Claude changed under Code', async () => {
-    await page.getByRole('tab', { name: /Code/ }).click();
+    await page.getByRole('tab', { name: /Inspect/ }).click();
     await page.locator('.file-change', { hasText: 'hello.txt' }).waitFor();
     await shot('06-changes');
   });
@@ -130,7 +131,7 @@ describe('chat with Claude Code', () => {
 
 describe('design tokens', () => {
   it('edits a token and writes it to the stylesheet', async () => {
-    await page.getByRole('tab', { name: /Code/ }).click();
+    await page.getByRole('tab', { name: /Inspect/ }).click();
     await page.getByRole('button', { name: 'Tokens' }).click();
     const row = page.locator('.tok-row', { hasText: '--radius-md' });
     await row.waitFor();
@@ -152,13 +153,50 @@ describe('canvas', () => {
     await page.mouse.down();
     await page.mouse.move(b.x + 420, b.y + 300, { steps: 6 });
     await page.mouse.up();
-    await page.getByRole('button', { name: 'Layers', exact: true }).click();
+    await page.getByRole('button', { name: 'File', exact: true }).click();
     await expect.poll(() => page.locator('.side.left').innerText()).toMatch(/Rectangle/);
-    await page.getByRole('tab', { name: /Figma/ }).click();
+    await page.getByRole('tab', { name: /Design/ }).click();
     await shot('08-rectangle');
-    await page.getByRole('tab', { name: /Code/ }).click();
+    await page.getByRole('tab', { name: /Inspect/ }).click();
     await expect.poll(() => page.locator('.side.right').innerText()).toContain('width: 120px');
     await shot('09-rectangle-code');
+  });
+
+  it('navigates and searches pages with keyboard shortcuts', async () => {
+    await page.getByRole('button', { name: 'Add page', exact: true }).click();
+    await page.getByRole('button', { name: 'Page 2', exact: true }).waitFor();
+    await page.keyboard.press('Alt+2');
+    await page.getByRole('button', { name: 'Assets', exact: true }).waitFor();
+    await expect.poll(() => page.getByRole('button', { name: 'Assets', exact: true }).getAttribute('aria-pressed')).toBe('true');
+    await page.keyboard.press('ControlOrMeta+f');
+    const find = page.getByRole('searchbox', { name: 'Find layers or text' });
+    await find.fill('Rectangle');
+    await page.getByRole('button', { name: /Rectangle.*Page 1/ }).click();
+    await expect.poll(() => page.getByRole('button', { name: 'Page 1', exact: true }).getAttribute('aria-current')).toBe('page');
+    await page.keyboard.press('Shift+/');
+    const sheet = page.getByRole('dialog', { name: 'Keyboard shortcuts' });
+    await sheet.getByRole('searchbox').fill('Find layers');
+    await sheet.getByText('Find layers', { exact: true }).waitFor();
+    await page.keyboard.press('Escape');
+    await sheet.waitFor({ state: 'hidden' });
+    await expect.poll(() => page.locator('.canvas-root').evaluate((el) => document.activeElement === el)).toBe(true);
+    await page.keyboard.press('ControlOrMeta+/');
+    const actions = page.getByRole('dialog', { name: 'Quick actions' });
+    await actions.getByRole('searchbox').fill('Zoom to selection');
+    await page.keyboard.press('Enter');
+    await actions.waitFor({ state: 'hidden' });
+  });
+
+  it('exports the selected rectangle to a PNG', async () => {
+    await page.getByRole('tab', { name: 'Design', exact: true }).click();
+    await page.getByLabel('Export format').selectOption('png');
+    await page.getByLabel('Export scale').selectOption('2');
+    const [file] = await Promise.all([
+      page.waitForEvent('download', { timeout: 10000 }),
+      page.getByRole('button', { name: 'Export', exact: true }).click(),
+    ]);
+    expect(file.suggestedFilename()).toMatch(/@2x\.png$/);
+    expect(readFileSync((await file.path())!).subarray(1, 4).toString()).toBe('PNG');
   });
 
   it('saves the canvas into the project', async () => {
@@ -257,6 +295,10 @@ describe('without Claude Code', () => {
         expect(await p.getByRole('radio', { name: /Try the demo project/ }).count()).toBe(0);
         await p.getByRole('radio', { name: /blank canvas/ }).check();
         await p.getByRole('button', { name: 'Open Designer' }).click();
+        await p.getByRole('button', { name: 'Page 1', exact: true }).waitFor();
+        await p.keyboard.press('r');
+        await expect.poll(() => p.getByRole('button', { name: 'Rectangle', exact: true }).getAttribute('aria-pressed')).toBe('true');
+        await p.getByRole('button', { name: 'Agent', exact: true }).click();
         await p.getByRole('heading', { name: 'Claude Code is not installed' }).waitFor();
       }
       await p.context().close();

@@ -525,3 +525,36 @@ textarea.memory { width: 100%; min-height: 160px; border: 1px solid var(--line-2
 .name-form { display: flex; flex-direction: column; gap: 6px; }
 .name-form .input { width: 100%; }
 .row-actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+
+.workspace-rail { display: flex; flex-direction: column; gap: 4px; padding: 8px 5px; border-right: 1px solid var(--line); }
+.workspace-rail button { position: relative; color: var(--muted); background: transparent; border: 0; border-radius: 6px; min-height: 34px; padding: 0 6px; cursor: pointer; font: inherit; font-size: 11px; }
+.workspace-rail button:hover, .workspace-rail button.on { background: var(--bg); color: var(--text); }
+.workspace-rail .badge { margin-left: 3px; }
+.canvas-only > .workspace-rail, .canvas-only > .side { display: none; }
+.file-panel { flex: none; padding: 8px; border-bottom: 1px solid var(--line); max-height: 52%; overflow: auto; }
+.file-panel-title, .file-page { display: flex; align-items: center; gap: 4px; }
+.file-panel-title { justify-content: space-between; padding-left: 6px; }
+.file-page > button:first-child, .file-hit { text-align: left; min-width: 0; flex: 1; border: 0; background: transparent; color: inherit; padding: 4px 6px; border-radius: 5px; font: inherit; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-page > button:first-child.on, .file-page > button:first-child:hover, .file-hit:hover { background: var(--bg); }
+.file-panel input { width: 100%; margin-top: 8px; }
+.file-results { display: flex; flex-direction: column; }
+.file-hit { display: flex; justify-content: space-between; gap: 6px; }
+.file-hit span { overflow: hidden; text-overflow: ellipsis; }
+.file-hit small { flex: none; color: var(--muted); }
+.file-rename { min-width: 0; flex: 1; }
+.file-rename input { margin: 0; }
+dialog.dz-sheet { color: var(--text, #18181b); border: 1px solid var(--line, #ddd); }
+dialog.dz-sheet > input { display: block; margin: 10px; width: calc(100% - 20px); }
+dialog.dz-sheet::backdrop { background: rgb(0 0 0 / 22%); }
+.file-page-menu { display: flex; flex-direction: column; margin: 4px 0; padding: 4px; border: 1px solid var(--line); border-radius: 6px; }
+.file-page-menu button { text-align: left; border: 0; padding: 5px; border-radius: 4px; background: transparent; }
+.file-page-menu button:hover:enabled { background: var(--bg); }
+.agent-setup { padding: 12px; overflow: auto; }
+.agent-setup .card { width: auto; padding: 12px; overflow-wrap: anywhere; }
+.quick-actions { width: min(440px, calc(100vw - 32px)); max-height: 70vh; padding: 8px; border: 1px solid var(--line); border-radius: 9px; color: var(--text); background: var(--bg); box-shadow: var(--shadow); }
+.quick-actions::backdrop { background: rgb(0 0 0 / 22%); }
+.quick-actions input { width: 100%; margin-bottom: 6px; padding: 9px; border: 1px solid var(--line); background: transparent; border-radius: 5px; }
+.quick-actions button { width: 100%; padding: 6px 9px; text-align: left; color: inherit; background: transparent; border: 0; border-radius: 4px; }
+.quick-actions button:hover, .quick-actions button.on { background: var(--line); }
+.file-replace-toggle { padding: 4px 0; border: 0; background: transparent; color: var(--muted); }
+.file-replace .btn { margin: 5px 0; }

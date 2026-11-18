@@ -1,7 +1,7 @@
 // Figma-style keyboard shortcuts, clipboard and the context menu.
 
 import * as C from '../core/commands.js';
-import { showMenu, closeMenu, toast } from './dom.js';
+import { h, keyLabel, showMenu, closeMenu, toast } from './dom.js';
 import { hitTest } from '../core/hittest.js';
 import { pickTarget } from '../tools/select.js';
 
@@ -42,7 +42,39 @@ export const SHORTCUTS = [
   ['Text', [['Bold / italic / underline', 'Mod B / I / U'], ['Finish editing', 'Esc']]],
 ];
 
-export function bindShortcuts(editor, { layers, onShortcuts, onAskAI } = {}) {
+export function showShortcutSheet(editor, workspace = false) {
+  const groups = workspace ? [...SHORTCUTS, ['Workspace', [
+    ['File', 'Alt 1'], ['Assets', 'Alt 2'], ['Find layers', 'Mod F'],
+    ['Inspect', 'Shift D'], ['Quick actions', 'Mod /'], ['Toggle panels', 'Shift Mod \\'], ['Keyboard shortcuts', 'Shift ?'],
+  ]]] : SHORTCUTS;
+  const filter = h('input', { type: 'search', placeholder: 'Search shortcuts', 'aria-label': 'Search shortcuts' });
+  const results = h('div', { class: 'dz-sheet-body' });
+  const sheet = h('dialog', { class: 'dz-sheet', 'aria-label': 'Keyboard shortcuts', 'data-canvas-keys': 'off' },
+    h('div', { class: 'dz-sheet-head' }, 'Keyboard shortcuts', h('button', { 'aria-label': 'Close', class: 'dz-btn', onclick: () => sheet.close() }, 'Close')),
+    filter, results);
+  const render = () => {
+    const query = filter.value.trim().toLowerCase();
+    results.replaceChildren(...groups.flatMap(([group, rows]) => {
+      const matches = rows.filter(([label, keys]) => `${group} ${label} ${keyLabel(keys)} ${keys}`.toLowerCase().includes(query));
+      return matches.length ? [h('div', { class: 'dz-sheet-group' }, h('div', { class: 'dz-sheet-title' }, group),
+        ...matches.map(([label, keys]) => h('div', { class: 'dz-sheet-row' }, h('span', {}, label), h('kbd', {}, keyLabel(keys)))))] : [];
+    }));
+  };
+  filter.addEventListener('input', render);
+  sheet.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape') return;
+    event.preventDefault();
+    event.stopPropagation();
+    sheet.close();
+  });
+  sheet.addEventListener('close', () => { sheet.remove(); editor.root.focus(); }, { once: true });
+  document.body.append(sheet);
+  render();
+  sheet.showModal();
+  filter.focus();
+}
+
+export function bindShortcuts(editor, { layers, onShortcuts, onAskAI, onNavigate, onSave } = {}) {
   const store = editor.store;
   let clipboard = null;
 
@@ -57,7 +89,7 @@ export function bindShortcuts(editor, { layers, onShortcuts, onAskAI } = {}) {
     const code = e.code;
     const tool = editor.tool;
 
-    if (k === ' ' || code === 'Space') {
+    if ((k === ' ' || code === 'Space') && !e.target.closest?.('button, a, summary, [role=button]')) {
       if (!editor.keys.space) { editor.keys.space = true; editor.updateCursor(); }
       e.preventDefault();
       return;
@@ -67,6 +99,15 @@ export function bindShortcuts(editor, { layers, onShortcuts, onAskAI } = {}) {
     if (tool.onKey && tool.onKey(e)) { e.preventDefault(); return; }
 
     const run = (fn) => { e.preventDefault(); closeMenu(); fn(); };
+
+    if (onNavigate && !e.repeat) {
+      if (mod && !e.shiftKey && !e.altKey && code === 'Slash') return run(() => onNavigate('actions'));
+      if (mod && !e.shiftKey && !e.altKey && code === 'KeyF') return run(() => onNavigate('find'));
+      if (mod && e.shiftKey && !e.altKey && code === 'Backslash') return run(() => onNavigate('focus'));
+      if (!mod && e.altKey && !e.shiftKey && code === 'Digit1') return run(() => onNavigate('file'));
+      if (!mod && e.altKey && !e.shiftKey && code === 'Digit2') return run(() => onNavigate('assets'));
+      if (!mod && !e.altKey && e.shiftKey && code === 'KeyD') return run(() => onNavigate('inspect'));
+    }
 
     // ---- with Cmd/Ctrl ----
     if (mod) {
@@ -89,7 +130,7 @@ export function bindShortcuts(editor, { layers, onShortcuts, onAskAI } = {}) {
       if (k === '=' || k === '+') return run(() => editor.zoomStep(1));
       if (k === '-' || k === '_') return run(() => editor.zoomStep(-1));
       if (k === '0') return run(() => editor.zoomAt(1));
-      if (k === 's') return run(() => toast('Saved in this browser'));
+      if (k === 's' && !e.shiftKey && !e.altKey) return run(() => onSave ? onSave() : toast('Saved in this browser'));
       if (code === 'KeyT' && e.altKey && e.ctrlKey) return run(() => C.tidyUp(store));
       if (['b', 'i', 'u'].includes(k)) {
         const texts = store.selected().filter((n) => n.type === 'text');
@@ -132,6 +173,7 @@ export function bindShortcuts(editor, { layers, onShortcuts, onAskAI } = {}) {
         C.selectChildren(store);
       });
     }
+    if (e.key === 'Tab' && e.target.closest?.('button, a, summary, nav, aside')) return;
     if (e.key === 'Tab') return run(() => C.selectSibling(store, e.shiftKey ? -1 : 1));
     if (e.key === 'Backspace' || e.key === 'Delete') return run(() => C.deleteSelection(store));
     if (e.key.startsWith('Arrow')) {

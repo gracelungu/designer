@@ -34,6 +34,17 @@ export function renderNodes(store, ids, { exporting = false } = {}) {
 }
 
 function paintAttr(store, n, paint, defs, i) {
+  if (paint.type === 'linear' || paint.type === 'radial') {
+    const id = `gradient-${attr(n.id)}-${i}`;
+    const stops = (paint.stops ?? []).slice().sort((a, b) => a.offset - b.offset)
+      .map((stop) => `<stop offset="${attr(stop.offset)}" stop-color="${attr(stop.color)}" stop-opacity="${attr(stop.opacity ?? 1)}"/>`).join('');
+    if (paint.type === 'linear') {
+      const angle = (Number(paint.angle) || 0) * Math.PI / 180;
+      const dx = Math.cos(angle) / 2, dy = Math.sin(angle) / 2;
+      defs.push(`<linearGradient id="${id}" x1="${0.5 - dx}" y1="${0.5 - dy}" x2="${0.5 + dx}" y2="${0.5 + dy}">${stops}</linearGradient>`);
+    } else defs.push(`<radialGradient id="${id}">${stops}</radialGradient>`);
+    return `fill="url(#${id})" fill-opacity="${attr(paint.opacity ?? 1)}"`;
+  }
   if (paint.type === 'image') {
     const id = `img-${n.id}-${i}`;
     const href = assetURL(store, paint.asset);

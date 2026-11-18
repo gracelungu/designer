@@ -44,7 +44,7 @@ describe('smoke (browser): one source of truth for tokens', () => {
     page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
     page.on('pageerror', (e: Error) => errors.push(e.message));
     await page.goto(server.url);
-    await page.getByRole('tab', { name: /Code/ }).waitFor();
+    await page.getByRole('tab', { name: /Inspect/ }).waitFor();
   });
   afterAll(async () => {
     await browser?.close();
@@ -53,7 +53,7 @@ describe('smoke (browser): one source of truth for tokens', () => {
   });
 
   it('shows code tokens, CSS and Tailwind, in the Tokens tab', async () => {
-    await page.getByRole('tab', { name: /^Code/ }).click();
+    await page.getByRole('tab', { name: /^Inspect/ }).click();
     await page.locator('.tabs.sub').getByRole('button', { name: /^Tokens/ }).click();
     await page.getByText('No Figma variables yet.').waitFor();
     expect(await page.locator('.tok-row[data-key^="colors.brand.500"]').count()).toBe(1);
@@ -78,7 +78,7 @@ describe('smoke (browser): one source of truth for tokens', () => {
   it('shows the tokens of the selected layer in the properties panel', async () => {
     const out = (await mcp('add_to_canvas', { nodes: [{ type: 'rect', name: 'Card', x: 40, y: 40, w: 200, h: 120, fill: '#2563EB', radius: 8 }] })) as { result: { isError?: boolean } };
     expect(out.result.isError).toBeFalsy();
-    await page.getByRole('tab', { name: 'Figma', exact: true }).click();
+    await page.getByRole('tab', { name: 'Design', exact: true }).click();
     const tokens = page.locator('.layer-tokens');
     await tokens.waitFor();
     expect(await tokens.locator('[data-prop="Fill"]').innerText()).toContain('Color/Primary');

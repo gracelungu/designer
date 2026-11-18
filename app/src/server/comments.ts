@@ -20,6 +20,7 @@ export function cleanComment(raw: unknown): CanvasComment | null {
   const num = (v: unknown, d = 0) => (typeof v === 'number' && Number.isFinite(v) ? v : d);
   return {
     id: c.id,
+    ...(typeof c.pageId === 'string' ? { pageId: c.pageId } : {}),
     num: num(c.num),
     x: num(c.x),
     y: num(c.y),

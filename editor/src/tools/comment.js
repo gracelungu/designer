@@ -49,6 +49,10 @@ export class CommentLayer {
   get store() { return this.editor.store; }
   get visible() { return this.store.tool === 'comment' || this.showAlways; }
 
+  pageFor(c) {
+    return (c.nodeId && this.store.pageForNode(c.nodeId)) || c.pageId || 'page-1';
+  }
+
   anchor(c) {
     const n = c.nodeId && this.store.get(c.nodeId);
     if (n) {
@@ -75,6 +79,7 @@ export class CommentLayer {
   open(id) {
     const c = this.store.doc.comments.find((x) => x.id === id);
     if (!c) return;
+    this.store.switchPage(this.pageFor(c));
     this.draft = null;
     this.openId = id;
     this.showAlways = true;
@@ -96,7 +101,7 @@ export class CommentLayer {
     const comments = store.doc.comments;
     const num = comments.reduce((m, c) => Math.max(m, c.num || 0), 0) + 1;
     store.transact(() => {
-      comments.push({ id: uid(), num, x: d.x, y: d.y, nodeId: d.nodeId, dx: d.dx, dy: d.dy, author: this.author, text: text.trim(), at: Date.now(), replies: [], resolved: false });
+      comments.push({ id: uid(), pageId: store.pageId(), num, x: d.x, y: d.y, nodeId: d.nodeId, dx: d.dx, dy: d.dy, author: this.author, text: text.trim(), at: Date.now(), replies: [], resolved: false });
     });
     this.draft = null;
     this.openId = comments[comments.length - 1].id;
@@ -113,7 +118,7 @@ export class CommentLayer {
     if (!this.visible) { this.el.innerHTML = ''; this._last = ''; return; }
     let html = '';
     for (const c of store.doc.comments) {
-      if (c.resolved && this.openId !== c.id) continue;
+      if (this.pageFor(c) !== store.pageId() || (c.resolved && this.openId !== c.id)) continue;
       const s = this.editor.toScreen(this.anchor(c));
       html += `<button data-ui data-comment="${c.id}" class="dz-pin${this.openId === c.id ? ' on' : ''}" style="left:${s.x}px;top:${s.y}px">${c.num}</button>`;
       if (this.openId === c.id) {

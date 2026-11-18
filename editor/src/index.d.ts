@@ -40,7 +40,7 @@ export interface CodeInfo {
   error?: string | null;
 }
 export declare class Store {
-  doc: { name: string; nodes: Record<string, EditorNode>; root: string[]; comments: any[]; page: { name: string; background: string } };
+  doc: { name: string; nodes: Record<string, EditorNode>; root: string[]; comments: any[]; page: { id?: string; name: string; background: string } };
   assets: Record<string, string>;
   selection: string[];
   view: { x: number; y: number; zoom: number };
@@ -67,6 +67,15 @@ export declare class Store {
   worldBox(id: string): { x: number; y: number; w: number; h: number };
   selectionBox(ids?: string[]): { x: number; y: number; w: number; h: number } | null;
   allIds(): string[];
+  pages(): { id?: string; root?: string[]; order?: number; name: string; background: string }[];
+  pageId(): string;
+  pageForNode(id: string): string | null;
+  addPage(): string;
+  switchPage(id: string): boolean;
+  removePage(id: string): void;
+  duplicatePage(id: string): string | null;
+  reorderPage(id: string, offset: number): void;
+  moveSelectionToPage(id: string): void;
   moveBy(id: string, dx: number, dy: number): void;
 }
 export declare class Editor {
@@ -74,7 +83,7 @@ export declare class Editor {
   root: HTMLElement;
   store: Store;
   code: { info: Map<string, CodeInfo>; interacting: string | null; interact(id: string | null): void; post(id: string, msg: Record<string, unknown>): void; syncArgs(id: string, force?: boolean): void; frames: Map<string, any> };
-  comments: { author: string; showAlways: boolean; openId: string | null; open(id: string): void; close(): void; render(): void; anchor(c: any): { x: number; y: number } };
+  comments: { author: string; showAlways: boolean; openId: string | null; open(id: string): void; close(): void; closeDraft(): void; render(): void; pageFor(c: any): string; anchor(c: any): { x: number; y: number } };
   setTool(id: string): void;
   zoomToFit(): void;
   zoomToSelection(): void;
@@ -98,7 +107,8 @@ export declare const commands: Record<string, (...args: any[]) => any>;
 export declare class Toolbar { constructor(editor: Editor, el: HTMLElement, opts?: { onAskAI?: (btn?: HTMLElement) => void }); }
 export declare class LayersPanel { constructor(editor: Editor, el: HTMLElement); }
 export declare class PropertiesPanel { constructor(editor: Editor, el: HTMLElement, opts?: { layers?: LayersPanel }); tab: string; }
-export declare function bindShortcuts(editor: Editor, opts?: { layers?: LayersPanel; onShortcuts?: () => void; onAskAI?: () => void }): { getClipboard(): unknown; unbind(): void };
+export declare function showShortcutSheet(editor: Editor, workspace?: boolean): void;
+export declare function bindShortcuts(editor: Editor, opts?: { layers?: LayersPanel; onShortcuts?: () => void; onNavigate?: (action: string) => void; onSave?: () => void; onAskAI?: () => void }): { getClipboard(): unknown; unbind(): void };
 export declare const SHORTCUTS: [string, [string, string][]][];
 export declare function showMenu(items: any[], x: number, y: number, opts?: any): void;
 export declare function toast(text: string): void;
