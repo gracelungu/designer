@@ -1,0 +1,76 @@
+name: Mac app
+
+# Builds the Mac app (Apple silicon and Intel) on pull requests and main, and
+# publishes a GitHub release, which the app's auto-update reads, for v* tags.
+# Signing and notarizing switch on when the secrets below exist; without them
+# the build is unsigned.
+#   CSC_LINK, CSC_KEY_PASSWORD                                  Developer ID Application certificate (.p12, base64)
+#   APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD, APPLE_TEAM_ID        notarization
+on:
+  pull_request:
+  push:
+    branches: [main]
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+concurrency:
+  group: mac-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build, smoke test and release
+    runs-on: macos-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: app
+    env:
+      CSC_LINK: ${{ secrets.CSC_LINK }}
+      CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - run: npm ci
+      - name: Signing
+        run: |
+          if [ -z "$CSC_LINK" ]; then
+            echo "No signing certificate in secrets: building unsigned."
+            echo "CSC_IDENTITY_AUTO_DISCOVERY=false" >> "$GITHUB_ENV"
+          else
+            echo "Signing with the Developer ID certificate."
+            [ -n "$APPLE_ID" ] && echo "Notarizing with Apple." || echo "No Apple ID secrets: signed but not notarized."
+          fi
+      - name: Check the tag matches the app version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          v=$(node -p "require('./package.json').version")
+          if [ "v$v" != "$GITHUB_REF_NAME" ]; then echo "Tag $GITHUB_REF_NAME does not match package.json version $v"; exit 1; fi
+      - name: Build the app
+        run: npm run build
+      - name: Package (and publish the release for tags)
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then PUBLISH="--publish always"; else PUBLISH="--publish never"; fi
+          npx electron-builder --config electron-builder.config.cjs --mac $PUBLISH
+      - name: Smoke test the packaged app
+        run: node test/smoke/electron-smoke.mjs "release/mac-arm64/Designer.app/Contents/MacOS/Designer"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Designer-mac
+          path: |
+            app/release/*.dmg
+            app/release/*.zip
+            app/release/latest-mac.yml
+          if-no-files-found: error

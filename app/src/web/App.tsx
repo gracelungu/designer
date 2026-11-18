@@ -11,6 +11,8 @@ import { DesignPanel } from './components/DesignPanel';
 import { CodePanel, RenderedStyles, useCanvasTick } from './components/CodePanel';
 import { ComponentsPanel } from './components/ComponentsPanel';
 import { canvasHost, reconnectLive, type CanvasHost } from './canvas/host';
+import { Onboarding, type StartChoice } from './components/Onboarding';
+import { UpdatePill } from './components/UpdatePill';
 
 interface Status {
   claude: ClaudeInstall;
@@ -18,6 +20,8 @@ interface Status {
   home: string;
   workspace: string;
   platform: string;
+  onboarded: boolean;
+  demo: boolean;
 }
 
 const Logo = () => (
@@ -30,12 +34,24 @@ const Logo = () => (
 
 export function App() {
   const [status, setStatus] = useState<Status>();
+  const [start, setStart] = useState<StartChoice>();
   useEffect(() => {
     void api<Status>('/api/status').then(setStatus);
   }, []);
   if (!status) return <div className="welcome">Starting Designer…</div>;
+  if (!status.onboarded)
+    return (
+      <Onboarding
+        claude={status.claude}
+        demo={status.demo}
+        onDone={(choice, claude) => {
+          setStart(choice);
+          setStatus({ ...status, claude, onboarded: true });
+        }}
+      />
+    );
   if (!status.claude.found || !status.claude.loggedIn) return <ClaudeSetup status={status} onRecheck={(c) => setStatus({ ...status, claude: c })} />;
-  return <Workspace status={status} />;
+  return <Workspace status={status} start={start} />;
 }
 
 function ClaudeSetup({ status, onRecheck }: { status: Status; onRecheck: (c: ClaudeInstall) => void }) {
@@ -67,7 +83,7 @@ function ClaudeSetup({ status, onRecheck }: { status: Status; onRecheck: (c: Cla
 type LeftTab = 'chat' | 'layers' | 'components';
 type ChatView = 'chat' | 'history' | 'claude';
 
-function Workspace({ status }: { status: Status }) {
+function Workspace({ status, start }: { status: Status; start?: StartChoice }) {
   const [chat, dispatch] = useReducer(chatReducer, initialChat);
   const [project, setProject] = useState<ProjectInfo | null>(null);
   const [caps, setCaps] = useState<Capabilities>();
@@ -130,7 +146,15 @@ function Workspace({ status }: { status: Status }) {
     });
     (async () => {
       const last = status.project ?? lsGet('designer.lastProject');
-      if (last) {
+      if (start === 'demo') {
+        try {
+          setProject(await api<ProjectInfo>('/api/demo', {}));
+          setLeft('components');
+        } catch (e) {
+          setToast({ text: (e as Error).message });
+        }
+      } else if (start === 'project') setModal('project');
+      else if (last) {
         try {
           setProject(await api<ProjectInfo>('/api/project', { path: last }));
         } catch {
@@ -295,6 +319,7 @@ function Workspace({ status }: { status: Status }) {
           )}
         </div>
         <span className="spacer" />
+        <UpdatePill />
         <button className="btn" onClick={() => setModal('figma')}>Import from Figma</button>
         {project ? (
           <>
@@ -395,6 +420,10 @@ function Workspace({ status }: { status: Status }) {
             <ProjectPicker
               home={status.home}
               current={project?.path}
+              onDemo={status.demo ? async () => {
+                await api<ProjectInfo>('/api/demo', {});
+                setModal(null);
+              } : undefined}
               onCancel={() => setModal(null)}
               onOpen={async (path) => {
                 await api<ProjectInfo>('/api/project', { path });

@@ -1,0 +1,23 @@
+{
+  "name": "designer-demo",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "A small pricing page with a design system, bundled with Designer so you can try it without your own repo.",
+  "scripts": {
+    "dev": "vite --port 5180",
+    "build": "vite build",
+    "storybook": "storybook dev -p 6106 --no-open --ci",
+    "build-storybook": "storybook build"
+  },
+  "dependencies": {
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
+  },
+  "devDependencies": {
+    "@storybook/react-vite": "^10.6.7",
+    "@vitejs/plugin-react": "^6.3.0",
+    "storybook": "^10.6.7",
+    "vite": "^8.3.8"
+  }
+}

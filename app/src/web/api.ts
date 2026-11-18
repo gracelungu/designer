@@ -1,9 +1,28 @@
 import type { ClientMessage, ServerMessage } from '../shared/protocol';
 
+/** What the Mac app's updater is doing, sent from the main process. */
+export interface UpdateState {
+  state: 'disabled' | 'idle' | 'checking' | 'none' | 'downloading' | 'ready' | 'available' | 'error';
+  /** The newer version, once one is found. */
+  version?: string;
+  /** For unsigned builds: where to download the new version by hand. */
+  url?: string;
+  percent?: number;
+  error?: string;
+}
+
 declare global {
   interface Window {
     __DESIGNER_TOKEN__?: string;
-    designerNative?: { pickFolder(): Promise<string | null>; openExternal(url: string): void; isElectron: true };
+    designerNative?: {
+      pickFolder(): Promise<string | null>;
+      openExternal(url: string): void;
+      isElectron: true;
+      getUpdate?(): Promise<UpdateState>;
+      onUpdate?(cb: (s: UpdateState) => void): () => void;
+      installUpdate?(): void;
+      checkForUpdates?(): void;
+    };
   }
 }
 declare const __DEV_TOKEN__: string;

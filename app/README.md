@@ -60,51 +60,41 @@ The server listens only on `127.0.0.1`, answers only loopback `Host` headers, an
 
 ## The Mac app
 
-Every push and pull request builds the Mac app in GitHub Actions (`.github/workflows/mac.yml`), for both Apple silicon and Intel. Download it from the run's **Designer-mac** artifact. Pushing a `v*` tag also attaches the builds to a GitHub release.
+The first launch walks through a short welcome: what Designer is, a check that Claude Code is installed and signed in, an optional Figma connection, and how to start: the **bundled demo project**, your own project, or a blank canvas. **Help › Show Welcome Again** brings it back.
 
-To build it on your own Mac, run `npm run dist:mac`. The builds land in `release/`.
+### Demo project
 
-The builds are **unsigned**, so macOS will block them the first time. To open one:
+`demo/` is a small Vite + React pricing page ("Lumen") with design tokens in `src/tokens.css` and `Button`, `Badge` and `PriceCard` components, each with a Storybook story. The app ships it as a resource. Choosing it copies it to `~/Designer/Lumen demo` as its own git repository, so edits and Save version never touch the app. It's also under **Add a project › Open the demo project**.
 
-- Right-click Designer.app, choose **Open**, then confirm.
-- Or run `xattr -cr /Applications/Designer.app` once.
+### Builds and releases
 
-Signing and notarizing need an Apple Developer account and these repository secrets:
+`.github/workflows/mac.yml` builds the Mac app for Apple silicon and Intel on every pull request and push to `main`, smoke-tests the packaged app, and uploads it as the run's **Designer-mac** artifact. Pushing a `v*` tag that matches `version` in `package.json` publishes a GitHub release with the dmg, zip and `latest-mac.yml`.
 
-- `CSC_LINK`: a base64 Developer ID Application certificate (.p12)
-- `CSC_KEY_PASSWORD`
-- `APPLE_ID`
-- `APPLE_APP_SPECIFIC_PASSWORD`
-- `APPLE_TEAM_ID`
+To build on your own Mac, run `npm run dist:mac`. The builds land in `release/`. Settings are in `build/builder-config.cjs`.
 
-Then set `mac.identity` back to the default and `hardenedRuntime: true`, and add `notarize: true` in `package.json`.
+### Signing and notarizing
 
-The Mac app reads `PATH` and exported variables from your login shell, because apps opened from Finder don't inherit them. That is how it finds `claude` and an `ANTHROPIC_API_KEY` set in `~/.zshrc`.
+They switch on by themselves when these repository secrets exist, and are skipped when they don't:
 
-## What CI checks
+- `CSC_LINK` (a base64 Developer ID Application .p12) and `CSC_KEY_PASSWORD`: sign with the hardened runtime.
+- `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID`: also notarize.
 
-The CI workflow (`.github/workflows/ci.yml`) runs on every pull request:
+Unsigned builds are blocked by macOS the first time. Right-click Designer.app, choose **Open**, then confirm, or run `xattr -cr /Applications/Designer.app` once.
 
-- lint, typecheck, unit tests and build
-- a check that the built server starts and refuses API calls without the token
+### Auto-update
 
-The tests drive a stand-in `claude` (`test/fixtures/fake-claude.mjs`) that speaks the same protocol. They cover streaming, permission allow and deny, the before/after snapshots and rewind.
+The app checks GitHub releases 10 seconds after launch and every 6 hours, or from **Designer › Check for Updates…**.
 
-CI cannot sign in to Claude, so the check against a real `claude` is a local step:
+- **Signed builds** download the update in the background, then show **Restart to update** in the top bar.
+- **Unsigned builds** can't replace themselves (macOS refuses), so they show **Designer x.y.z is out · Download**, which opens the release page.
 
-1. Run `npm start`.
-2. Open a repository.
-3. Send a prompt.
+## Tests
 
-## Layout
+| Command | What it covers |
+| --- | --- |
+| `npm test` | Unit and integration tests: the Claude Code protocol, MCP server, Figma, Storybook, tokens, the HTTP server and its security, onboarding, the demo, the updater and the build settings |
+| `npm run test:e2e` | The built UI in Chromium with a stand-in Claude Code: onboarding, the demo, chat and permissions, changes, tokens, drawing on the canvas, Figma import, Save version, update notices (run `npm run build` first) |
+| `node ../editor/tests/e2e.cjs` | The canvas editor's own 25 checks |
+| `npm run test:smoke` | Starts the desktop app headless and checks the window, onboarding, native bridge and demo. Pass a packaged binary path to `node test/smoke/electron-smoke.mjs` to check a release build |
 
-```
-src/server/claudeCli.ts   spawns `claude` and speaks its control protocol
-src/server/session.ts     turns CLI events into chat items; permissions, edit snapshots, rewind
-src/server/claude.ts      finds `claude`, checks sign-in, reads permission modes, loads the login-shell env
-src/server/transcripts.ts sessions from ~/.claude/projects
-src/server/project.ts     git (Get latest / Save version / Share for review), stories, memory, dev servers
-src/server/index.ts       HTTP + WebSocket server
-src/web/                  React UI: canvas, components, chat, changes
-electron/                 the Mac app shell
-```
+`.github/workflows/ci.yml` runs all of them on every pull request.

@@ -1,9 +1,10 @@
 import js from '@eslint/js';
 import tseslint from 'typescript-eslint';
 import reactHooks from 'eslint-plugin-react-hooks';
+import globals from 'globals';
 
 export default tseslint.config(
-  { ignores: ['dist', 'release', 'node_modules'] },
+  { ignores: ['dist', 'release', 'node_modules', 'demo'] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
@@ -12,12 +13,12 @@ export default tseslint.config(
     rules: { 'react-hooks/rules-of-hooks': 'error', 'react-hooks/exhaustive-deps': 'warn' },
   },
   {
-    files: ['test/fixtures/**/*.mjs'],
-    languageOptions: { globals: { process: 'readonly', console: 'readonly' } },
+    files: ['test/fixtures/**/*.mjs', 'test/smoke/**/*.mjs'],
+    languageOptions: { globals: globals.node },
   },
   {
-    files: ['electron/**/*.cjs'],
-    languageOptions: { sourceType: 'commonjs', globals: { require: 'readonly', module: 'writable', __dirname: 'readonly', process: 'readonly', console: 'readonly' } },
+    files: ['electron/**/*.cjs', 'build/**/*.cjs', '*.cjs'],
+    languageOptions: { sourceType: 'commonjs', globals: globals.node },
     rules: { '@typescript-eslint/no-require-imports': 'off' },
   },
 );

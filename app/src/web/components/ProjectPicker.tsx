@@ -10,7 +10,7 @@ interface Listing {
 }
 
 /** Choose the repository folder Claude Code will work in. */
-export function ProjectPicker({ home, current, onOpen, onCancel }: { home: string; current?: string; onOpen: (path: string) => Promise<void>; onCancel?: () => void }) {
+export function ProjectPicker({ home, current, onOpen, onCancel, onDemo }: { home: string; current?: string; onOpen: (path: string) => Promise<void>; onCancel?: () => void; onDemo?: () => Promise<void> }) {
   const [dir, setDir] = useState<Listing>();
   const [error, setError] = useState('');
   const go = (path: string) => api<Listing>(`/api/fs?path=${encodeURIComponent(path)}`).then(setDir, (e: Error) => setError(e.message));
@@ -24,12 +24,15 @@ export function ProjectPicker({ home, current, onOpen, onCancel }: { home: strin
       <div>
         <h3>Add a project</h3>
         <p>Pick your repository's folder. The canvas, components and Save version work on it, and Claude works in it. You can also just mention a project in the chat.</p>
-        {window.designerNative && (
-          <div className="actions" style={{ marginBottom: 10 }}>
-            <button className="btn primary" onClick={async () => {
-              const p = await window.designerNative!.pickFolder();
-              if (p) await open(p);
-            }}>Choose folder…</button>
+        {(window.designerNative || onDemo) && (
+          <div className="actions" style={{ marginBottom: 10, justifyContent: 'flex-start' }}>
+            {window.designerNative && (
+              <button className="btn primary" onClick={async () => {
+                const p = await window.designerNative!.pickFolder();
+                if (p) await open(p);
+              }}>Choose folder…</button>
+            )}
+            {onDemo && <button className="btn" onClick={() => onDemo().catch((e: Error) => setError(e.message))}>Open the demo project</button>}
           </div>
         )}
         {dir && (
