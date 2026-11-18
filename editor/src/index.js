@@ -11,3 +11,4 @@ export { bindShortcuts, SHORTCUTS } from './ui/shortcuts.js';
 export { showMenu, toast, download } from './ui/dom.js';
 export { cssFor } from './ui/inspect.js';
 export { exportSVG } from './render/scene.js';
+export { pinTarget } from './tools/comment.js';

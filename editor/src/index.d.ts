@@ -103,3 +103,4 @@ export declare function toast(text: string): void;
 export declare function download(name: string, content: string, type?: string): void;
 export declare function cssFor(store: Store, n: EditorNode): string;
 export declare function exportSVG(store: Store, ids: string[]): string;
+export declare function pinTarget(store: Store, chain: string[] | null): string | null;
