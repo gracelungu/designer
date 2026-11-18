@@ -1,10 +1,10 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import type { FileChange, GitStatus } from '../../shared/protocol';
 import { api } from '../api';
 import { collapse, lineDiff } from '../diff';
 
 /** Before/after review of what Claude changed this session, plus uncommitted files from git. */
-export function Changes({ changes, git }: { changes: FileChange[]; git?: GitStatus }) {
+export function Changes({ changes, git, visual }: { changes: FileChange[]; git?: GitStatus; visual?: ReactNode }) {
   // Several edits to one file collapse into one entry: first "before", last "after".
   const byFile = useMemo(() => {
     const map = new Map<string, FileChange>();
@@ -18,6 +18,7 @@ export function Changes({ changes, git }: { changes: FileChange[]; git?: GitStat
 
   return (
     <div className="scroll">
+      {visual}
       <div className="section-title">Changed by Claude this session</div>
       {byFile.length === 0 && <div className="empty">When Claude edits a file, it shows up here with Before and After.</div>}
       {byFile.map((c) => (

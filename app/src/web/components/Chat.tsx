@@ -420,8 +420,17 @@ function Composer({
 
   useEffect(() => {
     const focus = () => ta.current?.focus();
+    // Another panel can start a message for the designer to finish ("About this change: …").
+    const prefill = (e: Event) => {
+      setText(String((e as CustomEvent).detail ?? ''));
+      setTimeout(focus, 0);
+    };
     window.addEventListener('designer:focus-chat', focus);
-    return () => window.removeEventListener('designer:focus-chat', focus);
+    window.addEventListener('designer:prefill', prefill);
+    return () => {
+      window.removeEventListener('designer:focus-chat', focus);
+      window.removeEventListener('designer:prefill', prefill);
+    };
   }, []);
 
   const slash = text.startsWith('/') && !/\s/.test(text) ? text.slice(1).toLowerCase() : null;

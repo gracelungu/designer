@@ -63,3 +63,8 @@ export class Socket {
 }
 
 export const socket = new Socket();
+
+/** Address of one before/after/diff image of a visual review (images can't send the token header). */
+export function reviewImage(id: string, file: string, bust = '') {
+  return `/api/review-image?id=${encodeURIComponent(id)}&file=${encodeURIComponent(file)}&token=${encodeURIComponent(token())}${bust ? `&v=${bust}` : ''}`;
+}

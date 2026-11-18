@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
-import type { Capabilities, ClaudeInstall, ProjectInfo } from '../shared/protocol';
+import type { Capabilities, ClaudeInstall, ProjectInfo, VisualReview } from '../shared/protocol';
 import { api, socket } from './api';
 import { chatReducer, initialChat } from './store';
 import { Chat, Menu, Spark, type CanvasContext, type Prefs } from './components/Chat';
@@ -11,6 +11,8 @@ import { DesignPanel } from './components/DesignPanel';
 import { CodePanel, RenderedStyles, useCanvasTick } from './components/CodePanel';
 import { ComponentsPanel } from './components/ComponentsPanel';
 import { canvasHost, reconnectLive, type CanvasHost } from './canvas/host';
+import { ReviewViewer, SendForReview, VisualChanges } from './components/VisualReview';
+import { VersionsPanel } from './components/Versions';
 
 interface Status {
   claude: ClaudeInstall;
@@ -64,7 +66,7 @@ function ClaudeSetup({ status, onRecheck }: { status: Status; onRecheck: (c: Cla
   );
 }
 
-type LeftTab = 'chat' | 'layers' | 'components';
+type LeftTab = 'chat' | 'layers' | 'components' | 'versions';
 type ChatView = 'chat' | 'history' | 'claude';
 
 function Workspace({ status }: { status: Status }) {
@@ -78,6 +80,8 @@ function Workspace({ status }: { status: Status }) {
   const [codeTab, setCodeTab] = useState<'tokens' | 'changes'>('changes');
   const [modal, setModal] = useState<'save' | 'share' | 'figma' | 'project' | null>(null);
   const [projectMenu, setProjectMenu] = useState(false);
+  const [reviews, setReviews] = useState<VisualReview[]>([]);
+  const [viewing, setViewing] = useState<VisualReview>();
   const [toast, setToast] = useState<{ text: string; url?: string; busy?: boolean }>();
   // Messages that are not progress go away by themselves; errors stay a little longer.
   useEffect(() => {
@@ -111,8 +115,16 @@ function Workspace({ status }: { status: Status }) {
         else lsDel('designer.lastProject');
         setRunning({});
         void host.load();
+        void api<VisualReview[]>('/api/reviews').then(setReviews, () => setReviews([]));
         return;
       }
+      if (m.type === 'review') {
+        setReviews((list) => [m.review, ...list.filter((r) => r.id !== m.review.id)].sort((a, b) => b.createdAt - a.createdAt));
+        setViewing((v) => (v?.id === m.review.id ? m.review : v));
+        if (!m.review.capturing && m.review.shots.some((s) => s.changed)) setCodeTab('changes');
+        return;
+      }
+      if (m.type === 'share-step') return;
       if (m.type === 'run') {
         setRunning((r) => ({ ...r, [m.kind]: m.url }));
         if (m.kind === 'app') void host.showPage(m.url);
@@ -138,6 +150,7 @@ function Workspace({ status }: { status: Status }) {
         }
       }
       await host.load();
+      void api<VisualReview[]>('/api/reviews').then(setReviews, () => undefined);
       const r = await api<{ app: string | null; storybook: string | null }>('/api/run').catch(() => ({ app: null, storybook: null }));
       setRunning(r);
       socket.send({ type: 'start', model: prefs.model, effort: prefs.effort, mode: prefs.mode });
@@ -301,7 +314,7 @@ function Workspace({ status }: { status: Status }) {
             <button className="btn" onClick={() => gitAction('/api/git/latest', {})} disabled={!git?.remote} title="Pull what the team changed">
               Get latest {git && git.behind > 0 && <span className="badge dark">{git.behind}</span>}
             </button>
-            <button className="btn" onClick={() => setModal('save')} disabled={!git?.isRepo}>
+            <button className="btn" onClick={() => setModal('save')} disabled={!git?.isRepo} title="Add the current state to version history">
               Save version {git && git.changed.length > 0 && <span className="badge">{git.changed.length}</span>}
             </button>
             <button className="btn primary" onClick={() => setModal('share')} disabled={!git?.remote}>Share for review</button>
@@ -314,9 +327,9 @@ function Workspace({ status }: { status: Status }) {
       <div className="body">
         <aside className="side left">
           <div className="tabs">
-            {(['chat', 'layers', 'components'] as LeftTab[]).map((t) => (
+            {(['chat', 'layers', 'components', 'versions'] as LeftTab[]).map((t) => (
               <button key={t} className={left === t ? 'on' : ''} onClick={() => setLeft(t)}>
-                {t === 'chat' ? 'Chat' : t === 'layers' ? 'Layers' : 'Components'}
+                {t === 'chat' ? 'Chat' : t === 'layers' ? 'Layers' : t === 'components' ? 'Components' : 'Versions'}
               </button>
             ))}
           </div>
@@ -341,6 +354,9 @@ function Workspace({ status }: { status: Status }) {
           </div>
           <div className={`pane ${left === 'components' ? '' : 'hidden'}`} data-canvas-keys="off">
             <ComponentsPanel project={project} storybookRunning={!!running.storybook} onPlace={(id) => placeStory(id)} onAsk={(p) => ask(p, false)} onAddProject={() => setModal('project')} />
+          </div>
+          <div className={`pane ${left === 'versions' ? '' : 'hidden'}`}>
+            {left === 'versions' && <VersionsPanel hasProject={!!project} onToast={setToast} onAsk={(p) => ask(p, false)} />}
           </div>
         </aside>
 
@@ -380,7 +396,7 @@ function Workspace({ status }: { status: Status }) {
                   </button>
                   <button className={codeTab === 'tokens' ? 'on' : ''} onClick={() => setCodeTab('tokens')}>Tokens</button>
                 </div>
-                {codeTab === 'tokens' ? <DesignPanel onAsk={(p) => ask(p, false)} onChanged={() => void refreshProject()} /> : <Changes changes={chat.changes} git={project.git} />}
+                {codeTab === 'tokens' ? <DesignPanel onAsk={(p) => ask(p, false)} onChanged={() => void refreshProject()} /> : <Changes changes={chat.changes} git={project.git} visual={<VisualChanges reviews={reviews} onOpen={setViewing} />} />}
               </>
             ) : (
               <div className="empty">Select a layer to see it as code. Add a project to see its tokens and what changed.</div>
@@ -406,24 +422,18 @@ function Workspace({ status }: { status: Status }) {
       )}
       {modal === 'save' && (
         <TextModal
-          title="Save version"
-          body="Saves everything that changed, the canvas included, as a version you can come back to."
-          placeholder="What changed? e.g. Denser pricing cards"
+          title="Add to version history"
+          body="Saves everything that changed, the canvas included, as a named version you can come back to from the Versions tab."
+          placeholder="Title, e.g. Denser pricing cards"
           action="Save version"
           onClose={() => setModal(null)}
-          onSubmit={(t) => gitAction('/api/git/save', { message: t })}
+          onSubmit={(t) => gitAction('/api/versions/name', { name: t || 'Design update' })}
         />
       )}
       {modal === 'share' && (
-        <TextModal
-          title="Share for review"
-          body="Sends your saved versions to the team as a pull request, on a branch of their own."
-          placeholder="Title for the review"
-          action="Share"
-          onClose={() => setModal(null)}
-          onSubmit={(t) => gitAction('/api/git/share', { title: t })}
-        />
+        <SendForReview reviews={reviews} unsaved={git?.changed.length ?? 0} onClose={() => setModal(null)} onDone={() => void refreshProject()} />
       )}
+      {viewing && <ReviewViewer review={viewing} onClose={() => setViewing(undefined)} onAsk={(p) => (setLeft('chat'), setChatView('chat'), window.dispatchEvent(new CustomEvent('designer:prefill', { detail: p })))} />}
       {modal === 'figma' && <FigmaImport sessionRunning={s.running} onClose={() => (setModal(null), setLeft('chat'), setChatView('chat'))} />}
       {toast && (
         <div className={`toast ${toast.busy ? 'busy' : ''}`} role="status">

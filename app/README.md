@@ -42,6 +42,14 @@ The chat works through the CLI's own controls:
 - **Figma | Code properties.** The right panel switches between design properties (plus the rendered styles of a code layer, in Figma terms) and code properties (component props, size, a JSX snippet, or the CSS and code link of a design layer).
 - The canvas is saved to `<project>/.designer/canvas.json`, or `~/Designer/canvas.json` with no project.
 
+## Visual review, sharing and versions
+
+- **Before and after for every change.** When Claude is about to edit a file, Designer photographs the components on the canvas and the stories that show that file, in a headless Chrome, Edge, Brave or Chromium it finds on your computer (or `DESIGNER_BROWSER`). When Claude's turn ends it photographs them again and compares them pixel by pixel. Code › Changes lists each change with Side by side, Slider and Highlight views. Token edits get the same treatment. Pictures live in `.designer/reviews/`, kept out of git through `.git/info/exclude`.
+- **Share for review, in one click.** Saves your changes on a branch of their own, uploads the pictures to a `designer-screenshots` branch (so they never enter the change itself), pushes, and opens a pull request whose description shows before and after. It uses `gh` when it is signed in; otherwise it opens GitHub's (or GitLab's, or Azure DevOps') new pull request page with everything filled in.
+- **Versions tab, like Figma's version history.** Named versions (git tags under `version/`), every saved version with Restore (a new version with the old content, so nothing is lost), variations (branches) you can open, merge in or remove, and Sync with the team. Switching or restoring saves unsaved work first.
+
+Tests: `npm test` runs everything, including `test/smoke.test.ts`, which drives the built app (`npm run build` first) in a real browser with a stand-in Claude Code, Storybook and GitHub remote. Set `SMOKE_SHOTS=<folder>` to keep its screenshots.
+
 ## Run it as a local server
 
 You need Node 20 or newer, and Claude Code installed and signed in.

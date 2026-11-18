@@ -40,13 +40,15 @@ createInterface({ input: process.stdin }).on('line', async (line) => {
     out({ type: 'stream_event', parent_tool_use_id: null, event: { type: 'message_start', message: { id: 'msg1' } } });
     out({ type: 'stream_event', parent_tool_use_id: null, event: { type: 'content_block_start', index: 0, content_block: { type: 'text' } } });
     out({ type: 'stream_event', parent_tool_use_id: null, event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'Editing ' } } });
-    const file = join(process.cwd(), 'hello.txt');
-    const input = { file_path: file, old_string: 'hello', new_string: text };
+    // FAKE_CLAUDE_FILE / FAKE_CLAUDE_FROM: edit another file, swapping FROM for the last line of the prompt.
+    const file = join(process.cwd(), process.env.FAKE_CLAUDE_FILE || 'hello.txt');
+    const from = process.env.FAKE_CLAUDE_FROM || 'hello';
+    const input = { file_path: file, old_string: from, new_string: process.env.FAKE_CLAUDE_FILE ? text.trim().split('\n').pop() : text };
     out({ type: 'assistant', parent_tool_use_id: null, message: { id: 'msg1', content: [{ type: 'text', text: 'Editing now' }, { type: 'tool_use', id: 'tool1', name: 'Edit', input }] } });
     const perm = await ask({ subtype: 'can_use_tool', tool_name: 'Edit', input, tool_use_id: 'tool1' });
     if (perm.response.behavior === 'allow') {
       await ask({ subtype: 'hook_callback', callback_id: 'before-edit', input: { tool_name: 'Edit', tool_input: input }, tool_use_id: 'tool1' });
-      writeFileSync(file, readFileSync(file, 'utf8').replace('hello', text));
+      writeFileSync(file, readFileSync(file, 'utf8').replace(from, input.new_string));
       await ask({ subtype: 'hook_callback', callback_id: 'after-edit', input: { tool_name: 'Edit', tool_input: input }, tool_use_id: 'tool1' });
     }
     out({ type: 'user', parent_tool_use_id: null, message: { content: [{ type: 'tool_result', tool_use_id: 'tool1', content: perm.response.behavior === 'allow' ? 'ok' : 'denied', is_error: perm.response.behavior !== 'allow' }] } });
