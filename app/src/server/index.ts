@@ -12,6 +12,7 @@ import { findTokens, updateToken } from './tokens.js';
 import { DevProcess, diffFor, getLatest, listDir, projectInfo, readMemory, saveVersion, shareForReview, writeMemory } from './project.js';
 import { PreviewProxies } from './proxy.js';
 import { handleMcp, SYSTEM_PROMPT, type ToolHost } from './mcp.js';
+import { FigmaClient, figmaStatus, parseOutline } from './figma.js';
 import type { Capabilities, CanvasOp, CanvasState, ClaudeInstall, ClientMessage, ServerMessage } from '../shared/protocol.js';
 
 export interface ServerOptions {
@@ -45,6 +46,7 @@ export async function startServer(opts: ServerOptions = {}) {
   const app = new DevProcess('dev');
   const storybook = new DevProcess('storybook');
   const proxies = new PreviewProxies();
+  let figma: FigmaClient | undefined;
   const waiting = new Map<string, (r: unknown) => void>();
   let serverUrl = '';
 
@@ -211,18 +213,20 @@ export async function startServer(opts: ServerOptions = {}) {
       return { ok: true, path: f };
     },
     'GET /api/figma/status': async (_b, url) => {
-      const target = url.searchParams.get('url') || 'http://127.0.0.1:3845/mcp';
-      try {
-        const r = await fetch(target, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream' },
-          body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'designer', version: '0.1.0' } } }),
-          signal: AbortSignal.timeout(2500),
-        });
-        return { url: target, reachable: true, status: r.status };
-      } catch {
-        return { url: target, reachable: false };
-      }
+      const custom = url.searchParams.get('url');
+      const { status, client } = await figmaStatus(custom ? [custom] : undefined);
+      figma = client;
+      return status;
+    },
+    'GET /api/figma/node': async (_b, url) => {
+      const id = String(url.searchParams.get('id') ?? '');
+      if (!figma) throw new Error('Figma is not connected');
+      const outline = parseOutline(await figma.metadata(id));
+      return outline;
+    },
+    'GET /api/figma/thumb': async (_b, url) => {
+      if (!figma) return { src: null };
+      return { src: await figma.screenshot(String(url.searchParams.get('id') ?? '')).catch(() => null) };
     },
   };
 

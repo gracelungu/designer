@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { Capabilities, MemoryFile, SessionSummary } from '../../shared/protocol';
-import { api, socket } from '../api';
+import { api } from '../api';
 import type { SessionState } from '../store';
 
 /** Sessions to resume, plus what your Claude Code has loaded: commands, skills, MCP servers, memory. */
@@ -110,70 +110,6 @@ export function ClaudePanel({ caps, onRefresh }: { caps?: Capabilities; onRefres
           <b>{a.name}</b>
         </div>
       ))}
-    </div>
-  );
-}
-
-export function FigmaModal({ onClose, sessionRunning }: { onClose: () => void; sessionRunning: boolean }) {
-  const [url, setUrl] = useState('http://127.0.0.1:3845/mcp');
-  const [status, setStatus] = useState<{ reachable: boolean; status?: number }>();
-  const [component, setComponent] = useState('');
-  const send = (text: string) => {
-    if (!sessionRunning) socket.send({ type: 'start' });
-    socket.send({ type: 'connect-figma', url });
-    socket.send({ type: 'prompt', text });
-    onClose();
-  };
-  const check = () => api<{ reachable: boolean; status?: number }>(`/api/figma/status?url=${encodeURIComponent(url)}`).then(setStatus);
-  useEffect(() => {
-    void check();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-  return (
-    <div className="modal-back" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h3>Import from Figma</h3>
-        <p>
-          Select frames in the Figma desktop app, then import: Claude reads them through Figma's local MCP server and puts them on the canvas as editable layers, next to the matching components from your code. Turn the server on in Figma (Preferences → Enable Dev Mode MCP Server). No token needed.
-        </p>
-        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-          <input className="input" style={{ flex: 1 }} value={url} onChange={(e) => setUrl(e.target.value)} />
-          <button className="btn small" onClick={check}>Check</button>
-        </div>
-        <p style={{ marginTop: 8 }}>
-          <span className={`status-dot ${status?.reachable ? 'ok' : 'bad'}`} /> {status === undefined ? 'Checking…' : status.reachable ? 'Figma desktop MCP server is running.' : 'Not reachable. Is the Figma desktop app open with the MCP server enabled?'}
-        </p>
-        <h3 style={{ marginTop: 16 }}>Build a component that's not in code</h3>
-        <p>Select the component set in Figma, name it here, and Claude builds it with every variant, a story and your tokens, then compares it with the design.</p>
-        <div style={{ display: 'flex', gap: 6 }}>
-          <input className="input" style={{ flex: 1 }} placeholder="Component name, e.g. PlanBadge" value={component} onChange={(e) => setComponent(e.target.value)} />
-          <button
-            className="btn"
-            disabled={!status?.reachable || !component.trim()}
-            onClick={() =>
-              send(
-                `Build the ${component.trim()} component from my current Figma selection (a component set), using the figma MCP server. Steps: 1) read its variants, properties, variables and a screenshot of each variant; 2) put the design on the Designer canvas with add_to_canvas so we can see it; 3) propose the component's props (map Figma properties to props) and the files you will add, following this repo's existing component conventions, and wait for my OK; 4) build it with every variant using our existing tokens (no raw values when a token exists); 5) add a Storybook story with one story per variant; 6) show_component next to the design (nextToSelection), link the design to it (update_layers with codeLink), and list any differences you see.`,
-              )
-            }
-          >
-            Build in code
-          </button>
-        </div>
-        <div className="actions">
-          <button className="btn" onClick={onClose}>Close</button>
-          <button
-            className="btn primary"
-            disabled={!status?.reachable}
-            onClick={() =>
-              send(
-                'Use the figma MCP server to read my current Figma selection (metadata, design context and variables). Put it on the Designer canvas as editable layers with add_to_canvas, keeping real sizes, colours, text and auto layout. Where a part is one of our coded components, set codeLink on that layer and show_component next to the frame. Then tell me which components are not in our code yet. Do not change files yet.',
-              )
-            }
-          >
-            Import selection
-          </button>
-        </div>
-      </div>
     </div>
   );
 }

@@ -4,7 +4,8 @@ import { api, socket } from './api';
 import { chatReducer, initialChat } from './store';
 import { Chat, Menu, Spark, type CanvasContext, type Prefs } from './components/Chat';
 import { Changes } from './components/Changes';
-import { ClaudePanel, FigmaModal, SessionsPanel } from './components/ClaudePanel';
+import { ClaudePanel, SessionsPanel } from './components/ClaudePanel';
+import { FigmaImport } from './components/FigmaImport';
 import { ProjectPicker } from './components/ProjectPicker';
 import { DesignPanel } from './components/DesignPanel';
 import { CodePanel, RenderedStyles, useCanvasTick } from './components/CodePanel';
@@ -417,7 +418,7 @@ function Workspace({ status }: { status: Status }) {
           onSubmit={(t) => gitAction('/api/git/share', { title: t })}
         />
       )}
-      {modal === 'figma' && <FigmaModal sessionRunning={s.running} onClose={() => (setModal(null), setLeft('chat'), setChatView('chat'))} />}
+      {modal === 'figma' && <FigmaImport sessionRunning={s.running} onClose={() => (setModal(null), setLeft('chat'), setChatView('chat'))} />}
       {toast && (
         <div className="toast" onClick={() => setToast(undefined)}>
           {toast.text}
