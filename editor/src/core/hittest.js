@@ -9,7 +9,7 @@ function context() {
   return ctx;
 }
 
-const BOX_TYPES = new Set(['frame', 'section', 'text', 'image']);
+const BOX_TYPES = new Set(['frame', 'section', 'text', 'image', 'code']);
 
 export function hitNode(store, n, world, tol) {
   const m = store.matrix(n.id);

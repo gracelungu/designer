@@ -20,10 +20,10 @@ export function ProjectPicker({ home, current, onOpen, onCancel }: { home: strin
   }, []);
   const open = (p: string) => onOpen(p).catch((e: Error) => setError(e.message));
   return (
-    <div className="welcome">
-      <div className="card" style={{ maxWidth: 560, width: '100%' }}>
-        <h2>Open a project</h2>
-        <p>Pick your repository's folder. Claude Code will work in it, and the canvas will show it.</p>
+    <div className="modal picker" data-canvas-keys="off">
+      <div>
+        <h3>Add a project</h3>
+        <p>Pick your repository's folder. The canvas, components and Save version work on it, and Claude works in it. You can also just mention a project in the chat.</p>
         {window.designerNative && (
           <div className="actions" style={{ marginBottom: 10 }}>
             <button className="btn primary" onClick={async () => {

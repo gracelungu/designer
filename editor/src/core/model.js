@@ -19,7 +19,7 @@ export const isLine = (n) => !!n && (n.type === 'line' || n.type === 'arrow');
 export const TYPE_LABEL = {
   frame: 'Frame', section: 'Section', group: 'Group', rect: 'Rectangle', ellipse: 'Ellipse',
   line: 'Line', arrow: 'Arrow', polygon: 'Polygon', star: 'Star', vector: 'Vector',
-  text: 'Text', image: 'Image',
+  text: 'Text', image: 'Image', code: 'Component',
 };
 
 export const solid = (color, opacity = 1) => ({ type: 'solid', color, opacity, visible: true });
@@ -94,6 +94,11 @@ export function createNode(type, props = {}) {
       break;
     case 'image':
       Object.assign(n, { fills: [{ type: 'image', asset: null, fit: 'fill', opacity: 1, visible: true }] });
+      break;
+    case 'code':
+      // A live render of real code: one component (or a page) from the project, shown as a layer.
+      // `src` is the URL the host app gives it; `hug` lets the rendered content decide the size.
+      Object.assign(n, { w: 120, h: 40, code: { kind: 'component', src: null, title: '', hug: true, args: {} } });
       break;
   }
   return Object.assign(n, props);

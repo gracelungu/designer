@@ -134,7 +134,7 @@ export function FigmaModal({ onClose, sessionRunning }: { onClose: () => void; s
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <h3>Import from Figma</h3>
         <p>
-          Recommended: the Figma desktop app's local MCP server. Turn it on in Figma (Preferences → Enable Dev Mode MCP Server), select frames, then import. No token needed.
+          Select frames in the Figma desktop app, then import: Claude reads them through Figma's local MCP server and puts them on the canvas as editable layers, next to the matching components from your code. Turn the server on in Figma (Preferences → Enable Dev Mode MCP Server). No token needed.
         </p>
         <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
           <input className="input" style={{ flex: 1 }} value={url} onChange={(e) => setUrl(e.target.value)} />
@@ -152,7 +152,7 @@ export function FigmaModal({ onClose, sessionRunning }: { onClose: () => void; s
             disabled={!status?.reachable || !component.trim()}
             onClick={() =>
               send(
-                `Build the ${component.trim()} component from my current Figma selection (a component set), using the figma MCP server. Steps: 1) read its variants, properties, variables and a screenshot of each variant; 2) propose the component's props (map Figma properties to props) and the files you will add, following this repo's existing component conventions, and wait for my OK; 3) build it with every variant using our existing tokens (no raw values when a token exists); 4) add a Storybook story with one story per variant; 5) compare each variant with the Figma screenshot and list any differences.`,
+                `Build the ${component.trim()} component from my current Figma selection (a component set), using the figma MCP server. Steps: 1) read its variants, properties, variables and a screenshot of each variant; 2) put the design on the Designer canvas with add_to_canvas so we can see it; 3) propose the component's props (map Figma properties to props) and the files you will add, following this repo's existing component conventions, and wait for my OK; 4) build it with every variant using our existing tokens (no raw values when a token exists); 5) add a Storybook story with one story per variant; 6) show_component next to the design (nextToSelection), link the design to it (update_layers with codeLink), and list any differences you see.`,
               )
             }
           >
@@ -166,7 +166,7 @@ export function FigmaModal({ onClose, sessionRunning }: { onClose: () => void; s
             disabled={!status?.reachable}
             onClick={() =>
               send(
-                'Use the figma MCP server to read my current Figma selection (design context, variables and screenshot). Summarise the frames and which of our existing components they use, list any component that is not in our code yet, and propose how to build the screen with our components and tokens. Do not change files yet.',
+                'Use the figma MCP server to read my current Figma selection (metadata, design context and variables). Put it on the Designer canvas as editable layers with add_to_canvas, keeping real sizes, colours, text and auto layout. Where a part is one of our coded components, set codeLink on that layer and show_component next to the frame. Then tell me which components are not in our code yet. Do not change files yet.',
               )
             }
           >

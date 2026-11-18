@@ -23,7 +23,7 @@ describe('summarizeTool', () => {
   it('describes steps in plain words', () => {
     expect(summarizeTool('Edit', { file_path: '/repo/src/a.tsx' }, '/repo')).toBe('Edit src/a.tsx');
     expect(summarizeTool('Bash', { command: 'npm test' }, '/repo')).toBe('Run `npm test`');
-    expect(summarizeTool('mcp__figma__get_code', {}, '/repo')).toBe('figma: get_code');
+    expect(summarizeTool('mcp__figma__get_code', {}, '/repo')).toBe('Read Figma (get code)');
   });
 });
 

@@ -5,7 +5,9 @@ import { showMenu, closeMenu, toast } from './dom.js';
 import { hitTest } from '../core/hittest.js';
 import { pickTarget } from '../tools/select.js';
 
-const isTyping = (t) => t && (t.closest?.('input, textarea, select, [contenteditable=""], [contenteditable="true"], [contenteditable="plaintext-only"]'));
+// Keys typed in fields, or anywhere inside an element marked data-canvas-keys="off" (a host app's chat, say), stay there.
+const isTyping = (t) => t && (t.closest?.('input, textarea, select, [contenteditable=""], [contenteditable="true"], [contenteditable="plaintext-only"], [data-canvas-keys="off"]'));
+const hasTextSelection = () => { try { return !!String(window.getSelection() || '').trim(); } catch { return false; } };
 
 export const SHORTCUTS = [
   ['Tools', [
@@ -45,8 +47,10 @@ export function bindShortcuts(editor, { layers, onShortcuts, onAskAI } = {}) {
   let clipboard = null;
 
   const viewportRect = () => editor.viewRect();
+  const offs = [];
+  const listen = (target, type, fn) => { target.addEventListener(type, fn); offs.push(() => target.removeEventListener(type, fn)); };
 
-  window.addEventListener('keydown', (e) => {
+  listen(window, 'keydown', (e) => {
     if (isTyping(e.target)) return;
     const mod = e.metaKey || e.ctrlKey;
     const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
@@ -111,6 +115,7 @@ export function bindShortcuts(editor, { layers, onShortcuts, onAskAI } = {}) {
     // ---- plain keys ----
     if (e.key === 'Escape') {
       return run(() => {
+        if (editor.code && editor.code.interacting) { editor.code.interact(null); return; }
         if (store.overlay.editingPath) { editor.tools.move.exitPathEdit(); return; }
         if (store.tool !== 'move') { editor.setTool('move'); return; }
         const parents = [...new Set(store.selected().map((n) => n.parent).filter(Boolean))];
@@ -157,28 +162,28 @@ export function bindShortcuts(editor, { layers, onShortcuts, onAskAI } = {}) {
     if (k === '/' && onAskAI) return run(() => onAskAI());
   });
 
-  window.addEventListener('keyup', (e) => {
+  listen(window, 'keyup', (e) => {
     if (e.key === ' ' || e.code === 'Space') { editor.keys.space = false; editor.updateCursor(); }
     if (e.key === 'Alt') { editor.keys.alt = false; store.emit('overlay'); }
   });
-  window.addEventListener('blur', () => { editor.keys.space = false; editor.keys.alt = false; });
+  listen(window, 'blur', () => { editor.keys.space = false; editor.keys.alt = false; });
 
   // ---- clipboard ----
-  document.addEventListener('copy', (e) => {
-    if (isTyping(e.target) || !store.selection.length) return;
+  listen(document, 'copy', (e) => {
+    if (isTyping(e.target) || isTyping(document.activeElement) || hasTextSelection() || !store.selection.length) return;
     clipboard = C.copy(store);
     e.clipboardData.setData('text/plain', JSON.stringify(clipboard));
     e.preventDefault();
   });
-  document.addEventListener('cut', (e) => {
-    if (isTyping(e.target) || !store.selection.length) return;
+  listen(document, 'cut', (e) => {
+    if (isTyping(e.target) || isTyping(document.activeElement) || hasTextSelection() || !store.selection.length) return;
     clipboard = C.copy(store);
     e.clipboardData.setData('text/plain', JSON.stringify(clipboard));
     e.preventDefault();
     C.deleteSelection(store);
   });
-  document.addEventListener('paste', (e) => {
-    if (isTyping(e.target)) return;
+  listen(document, 'paste', (e) => {
+    if (isTyping(e.target) || isTyping(document.activeElement)) return;
     e.preventDefault();
     const files = [...(e.clipboardData?.files || [])].filter((f) => f.type.startsWith('image/'));
     if (files.length) { editor.insertImages(files); return; }
@@ -242,5 +247,5 @@ export function bindShortcuts(editor, { layers, onShortcuts, onAskAI } = {}) {
     showMenu(items, e.clientX, e.clientY);
   });
 
-  return { getClipboard: () => clipboard };
+  return { getClipboard: () => clipboard, unbind: () => offs.forEach((off) => off()) };
 }

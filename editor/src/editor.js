@@ -13,6 +13,8 @@ import { PencilTool } from './tools/pencil.js';
 import { TextTool, TextEditor } from './tools/text.js';
 import { HandTool } from './tools/hand.js';
 import { CommentTool, CommentLayer } from './tools/comment.js';
+import { CodeLayer } from './render/code.js';
+import { hitTest } from './core/hittest.js';
 
 export const TOOL_INFO = {
   move: { label: 'Move', key: 'V' },
@@ -53,6 +55,8 @@ export class Editor {
     this.worldEl = this.sceneEl.querySelector('.dz-world');
     this.overlayEl = root.querySelector('.dz-overlay');
     this.htmlEl = root.querySelector('.dz-html');
+    this.code = new CodeLayer(this);
+    root.insertBefore(this.code.el, this.overlayEl);
 
     this.textEditor = new TextEditor(this);
     this.comments = new CommentLayer(this);
@@ -149,6 +153,7 @@ export class Editor {
       this._rendered = true;
     }
     this.worldEl.setAttribute('transform', `translate(${v.x} ${v.y}) scale(${v.zoom})`);
+    this.code.render();
     this.overlayEl.innerHTML = renderOverlay(this);
     this.textEditor.position();
     this.comments.render();
@@ -175,6 +180,7 @@ export class Editor {
       if (e.target.closest('.dz-html [data-ui]')) return;
       if (this.textEditor.active && e.target.closest('.dz-text-editor')) return;
       el.focus({ preventScroll: true });
+      if (this.code.interacting) this.code.interact(null);
       const p = this.toWorld(e.clientX, e.clientY);
       if (e.button === 1 || (e.button === 0 && this.keys.space)) {
         down = { tool: this.tools.hand };
@@ -209,7 +215,12 @@ export class Editor {
     el.addEventListener('dblclick', (e) => {
       if (e.target.closest('.dz-html [data-ui]') || e.target.closest('.dz-text-editor')) return;
       const t = this.tool;
-      t.onDoubleClick && t.onDoubleClick(ev(e), this.toWorld(e.clientX, e.clientY));
+      const w = this.toWorld(e.clientX, e.clientY);
+      // Double-clicking a live component hands the pointer to it, so its own hover and click states can be tried.
+      const chain = this.store.tool === 'move' ? hitTest(this.store, w, 3) : null;
+      const hit = chain && this.store.get(chain[chain.length - 1]);
+      if (hit && hit.type === 'code' && this.store.selection.includes(hit.id) && hit.code.src) { this.code.interact(hit.id); return; }
+      t.onDoubleClick && t.onDoubleClick(ev(e), w);
     });
     el.addEventListener('wheel', (e) => {
       e.preventDefault();

@@ -1,19 +1,21 @@
-import { useCallback, useEffect, useReducer, useState } from 'react';
+import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import type { Capabilities, ClaudeInstall, ProjectInfo } from '../shared/protocol';
 import { api, socket } from './api';
 import { chatReducer, initialChat } from './store';
-import { Chat } from './components/Chat';
-import { Canvas } from './components/Canvas';
-import { ComponentsView } from './components/ComponentsView';
+import { Chat, Menu, Spark, type CanvasContext, type Prefs } from './components/Chat';
 import { Changes } from './components/Changes';
 import { ClaudePanel, FigmaModal, SessionsPanel } from './components/ClaudePanel';
 import { ProjectPicker } from './components/ProjectPicker';
 import { DesignPanel } from './components/DesignPanel';
+import { CodePanel, RenderedStyles, useCanvasTick } from './components/CodePanel';
+import { ComponentsPanel } from './components/ComponentsPanel';
+import { canvasHost, reconnectLive, type CanvasHost } from './canvas/host';
 
 interface Status {
   claude: ClaudeInstall;
   project: string | null;
   home: string;
+  workspace: string;
   platform: string;
 }
 
@@ -27,35 +29,12 @@ const Logo = () => (
 
 export function App() {
   const [status, setStatus] = useState<Status>();
-  const [project, setProject] = useState<ProjectInfo>();
-  const [picking, setPicking] = useState(false);
-
   useEffect(() => {
-    api<Status>('/api/status').then(async (s) => {
-      setStatus(s);
-      const last = s.project ?? localStorageGet('designer.lastProject');
-      if (last && s.claude.found) api<ProjectInfo>('/api/project', { path: last }).then(setProject, () => setPicking(true));
-      else setPicking(true);
-    });
+    void api<Status>('/api/status').then(setStatus);
   }, []);
-
   if (!status) return <div className="welcome">Starting Designer…</div>;
   if (!status.claude.found || !status.claude.loggedIn) return <ClaudeSetup status={status} onRecheck={(c) => setStatus({ ...status, claude: c })} />;
-  if (!project || picking)
-    return (
-      <ProjectPicker
-        home={status.home}
-        current={project?.path}
-        onCancel={project ? () => setPicking(false) : undefined}
-        onOpen={async (path) => {
-          const p = await api<ProjectInfo>('/api/project', { path });
-          localStorageSet('designer.lastProject', path);
-          setProject(p);
-          setPicking(false);
-        }}
-      />
-    );
-  return <Workspace key={project.path} project={project} setProject={setProject} claude={status.claude} onSwitch={() => setPicking(true)} isMac={status.platform === 'darwin'} />;
+  return <Workspace status={status} />;
 }
 
 function ClaudeSetup({ status, onRecheck }: { status: Status; onRecheck: (c: ClaudeInstall) => void }) {
@@ -84,89 +63,131 @@ function ClaudeSetup({ status, onRecheck }: { status: Status; onRecheck: (c: Cla
   );
 }
 
-type LeftTab = 'chat' | 'sessions' | 'claude';
+type LeftTab = 'chat' | 'layers' | 'components';
+type ChatView = 'chat' | 'history' | 'claude';
 
-function Workspace({ project, setProject, claude, onSwitch, isMac }: { project: ProjectInfo; setProject: (p: ProjectInfo) => void; claude: ClaudeInstall; onSwitch: () => void; isMac: boolean }) {
+function Workspace({ status }: { status: Status }) {
   const [chat, dispatch] = useReducer(chatReducer, initialChat);
+  const [project, setProject] = useState<ProjectInfo | null>(null);
   const [caps, setCaps] = useState<Capabilities>();
   const [capsError, setCapsError] = useState('');
   const [left, setLeft] = useState<LeftTab>('chat');
-  const [view, setView] = useState<'canvas' | 'components'>('canvas');
-  const [menu, setMenu] = useState(false);
+  const [chatView, setChatView] = useState<ChatView>('chat');
+  const [side, setSide] = useState<'figma' | 'code'>('figma');
+  const [codeTab, setCodeTab] = useState<'tokens' | 'changes'>('changes');
+  const [modal, setModal] = useState<'save' | 'share' | 'figma' | 'project' | null>(null);
+  const [projectMenu, setProjectMenu] = useState(false);
   const [toast, setToast] = useState<{ text: string; url?: string }>();
-  const [modal, setModal] = useState<'save' | 'share' | 'figma' | null>(null);
-  const [appUrl, setAppUrl] = useState<string>();
-  const [storybookUrl, setStorybookUrl] = useState<string>();
-  const [starting, setStarting] = useState<'app' | 'storybook' | null>(null);
-  const [context, setContext] = useState<string>();
-  const [right, setRight] = useState<'design' | 'changes'>('design');
-  const [reloadKey, setReloadKey] = useState(0);
-  const [prefs, setPrefs] = useState(() => ({ model: localStorageGet('designer.model') ?? undefined, effort: localStorageGet('designer.effort') ?? undefined, mode: localStorageGet('designer.mode') ?? undefined }));
+  const [running, setRunning] = useState<{ app?: string | null; storybook?: string | null }>({});
+  const [context, setContext] = useState<CanvasContext>();
+  const [prefs, setPrefs] = useState<Prefs>(() => ({ model: lsGet('designer.model') ?? undefined, effort: lsGet('designer.effort') ?? undefined, mode: lsGet('designer.mode') ?? undefined }));
+  const hostRef = useRef<CanvasHost>(undefined);
+  if (!hostRef.current) hostRef.current = canvasHost(() => window.dispatchEvent(new CustomEvent('designer:focus-chat')));
+  const host = hostRef.current;
+  const editor = host.editor;
+  useSelectionTick(editor);
 
-  const refreshProject = useCallback(() => api<ProjectInfo>('/api/project').then(setProject), [setProject]);
   const loadCaps = useCallback((refresh = false) => {
     setCapsError('');
     return api<Capabilities>(refresh ? '/api/capabilities/refresh' : '/api/capabilities', refresh ? {} : undefined).then(setCaps, (e: Error) => setCapsError(e.message));
   }, []);
 
+  const refreshProject = useCallback(() => api<ProjectInfo | null>('/api/project').then(setProject), []);
+
+  // Start-up: reopen the last project quietly if there was one (never ask), then start Claude Code.
   useEffect(() => {
     socket.connect();
     const off = socket.on((m) => {
-      dispatch(m);
-      if (m.type === 'item' && m.item.kind === 'result') {
-        void refreshProject();
-        // Dev servers with hot reload update the frames themselves; a reload covers the ones without it.
-        setReloadKey((k) => k + 1);
+      if (m.type === 'project') {
+        setProject(m.project);
+        if (m.project) lsSet('designer.lastProject', m.project.path);
+        else lsDel('designer.lastProject');
+        setRunning({});
+        void host.load();
+        return;
       }
+      if (m.type === 'run') {
+        setRunning((r) => ({ ...r, [m.kind]: m.url }));
+        if (m.kind === 'app') void host.showPage(m.url);
+        return;
+      }
+      if (m.type === 'canvas-op') {
+        void host.apply(m.op).then(
+          (result) => socket.send({ type: 'canvas-result', requestId: m.requestId, result }),
+          (e: Error) => socket.send({ type: 'canvas-result', requestId: m.requestId, result: { error: e.message } }),
+        );
+        return;
+      }
+      dispatch(m);
+      if (m.type === 'item' && m.item.kind === 'result') void refreshProject();
     });
-    // Start Claude Code in this folder with the last-used model, effort and mode, then read what it offers.
-    socket.send({ type: 'start', model: prefs.model, effort: prefs.effort, mode: prefs.mode });
-    const t = setTimeout(() => void loadCaps(), 300);
-    api<{ app: string | null; storybook: string | null }>('/api/run').then((r) => {
-      if (r.app) setAppUrl(r.app);
-      if (r.storybook) setStorybookUrl(r.storybook);
-    });
-    const onUrl = (e: Event) => setAppUrl((e as CustomEvent<string>).detail);
-    window.addEventListener('designer:app-url', onUrl);
+    (async () => {
+      const last = status.project ?? lsGet('designer.lastProject');
+      if (last) {
+        try {
+          setProject(await api<ProjectInfo>('/api/project', { path: last }));
+        } catch {
+          lsDel('designer.lastProject');
+        }
+      }
+      await host.load();
+      const r = await api<{ app: string | null; storybook: string | null }>('/api/run').catch(() => ({ app: null, storybook: null }));
+      setRunning(r);
+      socket.send({ type: 'start', model: prefs.model, effort: prefs.effort, mode: prefs.mode });
+      setTimeout(() => void loadCaps(), 400);
+    })();
     return () => {
       off();
-      clearTimeout(t);
-      window.removeEventListener('designer:app-url', onUrl);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const s = chat.session;
-  const model = caps?.models.find((m) => m.value === s.model) ?? caps?.models.find((m) => m.value === 'default') ?? caps?.models[0];
-  const modeInfo = caps?.modes.find((m) => m.value === s.mode) ?? caps?.modes[0];
-  const modes = caps?.modes.filter((m) => m.value !== 'auto' || model?.supportsAutoMode) ?? [];
+  // Live renders come back when their server is running again.
+  useEffect(() => {
+    if (running.storybook || running.app) void reconnectLive(host, running);
+  }, [running, host]);
 
-  const choose = (patch: { model?: string; effort?: string; mode?: string }) => {
+  // Keep Claude and the chat's selection chip in step with the canvas.
+  useEffect(() => {
+    let t: ReturnType<typeof setTimeout> | undefined;
+    return editor.store.on((ch) => {
+      if (!ch.has('selection') && !ch.has('commit')) return;
+      clearTimeout(t);
+      t = setTimeout(() => {
+        setContext(host.context());
+        socket.send({ type: 'canvas-state', state: host.state() });
+      }, 150);
+    });
+  }, [editor, host]);
+
+  useEffect(() => {
+    const figma = () => setModal('figma');
+    window.addEventListener('designer:figma', figma);
+    return () => window.removeEventListener('designer:figma', figma);
+  }, []);
+
+  const s = chat.session;
+  const choose = (patch: Prefs) => {
     const next = { ...prefs, ...patch };
     setPrefs(next);
-    for (const [k, v] of Object.entries(patch)) if (v) localStorageSet(`designer.${k}`, v);
+    for (const [k, v] of Object.entries(patch)) if (v) lsSet(`designer.${k}`, v);
     if (patch.model && s.running) socket.send({ type: 'set-model', model: patch.model });
     else if (patch.mode && s.running) socket.send({ type: 'set-mode', mode: patch.mode });
     // Effort is fixed for a Claude Code process, so continue the same conversation in a new one.
     else socket.send({ type: 'start', resume: s.sessionId, model: next.model, effort: next.effort, mode: next.mode });
   };
 
-  const ask = (text: string) => {
+  const ask = (text: string, withSelection = true) => {
     setLeft('chat');
-    socket.send({ type: 'prompt', text });
+    setChatView('chat');
+    const ctx = withSelection ? host.context() : undefined;
+    socket.send({ type: 'prompt', text, context: ctx?.text });
   };
 
-  const runDev = async (which: 'app' | 'storybook') => {
-    setStarting(which);
-    try {
-      const r = await api<{ url: string }>(`/api/run/${which}`, {});
-      if (which === 'app') setAppUrl(r.url);
-      else setStorybookUrl(r.url);
-    } catch (e) {
-      setToast({ text: (e as Error).message });
-    } finally {
-      setStarting(null);
-    }
+  const newChat = (resume?: string) => {
+    dispatch({ type: 'reset' });
+    socket.send({ type: 'start', resume, model: prefs.model, effort: prefs.effort, mode: prefs.mode });
+    setChatView('chat');
   };
 
   const gitAction = async (path: string, body: unknown) => {
@@ -174,150 +195,212 @@ function Workspace({ project, setProject, claude, onSwitch, isMac }: { project: 
       const r = await api<{ ok: boolean; message: string; url?: string }>(path, body);
       setToast({ text: r.message, url: r.url });
       await refreshProject();
-      setReloadKey((k) => k + 1);
     } catch (e) {
       setToast({ text: (e as Error).message });
     }
   };
 
-  const lastUser = [...chat.items].reverse().find((i) => i.kind === 'user' && i.userMessageId);
-  const changedCount = project.git.changed.length;
+  const placeStory = async (storyId: string, nextTo = false) => {
+    const entry = project?.stories.find((e) => e.stories.some((x) => x.id === storyId));
+    const story = entry?.stories.find((x) => x.id === storyId);
+    const title = entry ? `${entry.title.split('/').pop()}${story && entry.stories.length > 1 ? ` / ${story.name}` : ''}` : storyId;
+    if (!running.storybook) setToast({ text: 'Starting Storybook to render the component…' });
+    try {
+      await host.placeStory(storyId, { title, file: entry?.file, nextToSelection: nextTo });
+      setToast(undefined);
+    } catch (e) {
+      setToast({ text: (e as Error).message });
+      throw e;
+    }
+  };
+
+  const suggestions = project
+    ? [
+        { label: 'Run this project', prompt: 'Work out how this project runs and start it so I can see it on the canvas.' },
+        { label: 'Put a component on the canvas', prompt: 'Show the most used component of this repo on the canvas, rendered from code.' },
+        { label: 'Import my Figma selection', prompt: 'Read my current Figma selection with the figma MCP server and put it on the canvas as editable layers. If any part matches a component in this repo, show that component next to it.' },
+        { label: 'Explain this repo’s design system', prompt: 'Give me a short tour of this repo’s design system: tokens, the main components and where they live.' },
+      ]
+    : [
+        { label: 'Open a project from my dev folder', prompt: 'List the projects in my usual dev folders (like ~/dev, ~/code, ~/Projects) and ask me which one to open.' },
+        { label: 'Start a new project from scratch', prompt: 'Let’s start a new web project from scratch in Designer’s folder. Ask me what it’s for, then set it up with a component library and Storybook, open it, and run it.' },
+        { label: 'Sketch a screen on the canvas', prompt: 'Sketch a clean sign-in screen on the canvas as editable layers, using auto layout.' },
+      ];
+
+  const changedFiles = new Set(chat.changes.map((c) => c.path)).size;
+  const git = project?.git;
+  const hasSelection = editor.store.selection.length > 0;
+
+  const chatHeader = (
+    <div className="chat-head">
+      {chatView === 'chat' ? (
+        <span className="chat-title">{chat.items.find((i) => i.kind === 'user')?.kind === 'user' ? (chat.items.find((i) => i.kind === 'user') as { text: string }).text.slice(0, 40) : 'New chat'}</span>
+      ) : (
+        <button className="chat-back" onClick={() => setChatView('chat')}>
+          ‹ Back to chat
+        </button>
+      )}
+      <span className="grow" />
+      <button className="icon-btn" title="Chat history" aria-label="Chat history" onClick={() => setChatView(chatView === 'history' ? 'chat' : 'history')}>
+        <svg width="15" height="15" viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 8a5.5 5.5 0 1 0 1.6-3.9M2.5 2.5v2.5H5M8 5v3l2 1.5" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" /></svg>
+      </button>
+      <button className="icon-btn" title="Claude Code settings: MCP, memory, skills" aria-label="Claude Code settings" onClick={() => setChatView(chatView === 'claude' ? 'chat' : 'claude')}>
+        <Spark size={14} />
+      </button>
+      <button className="icon-btn" title="New chat" aria-label="New chat" onClick={() => newChat()}>
+        <svg width="15" height="15" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" /></svg>
+      </button>
+    </div>
+  );
 
   return (
     <div className="app">
-      <div className={`topbar ${isMac && window.designerNative ? 'mac' : ''}`}>
+      <div className={`topbar ${status.platform === 'darwin' && window.designerNative ? 'mac' : ''}`}>
         <Logo />
-        <button className="chip" onClick={onSwitch} title={project.path}>
-          <span style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.2 }}>
-            <b>{project.name}</b>
-            <span className="sub">{project.git.isRepo ? `${project.git.branch}${project.git.behind ? ` · ${project.git.behind} new from team` : ''}` : 'Not a git repository'}</span>
-          </span>
-        </button>
-        <button
-          className="icon-btn"
-          title="Undo Claude's last change"
-          disabled={!lastUser}
-          onClick={() => lastUser && lastUser.kind === 'user' && confirm('Undo the file changes from your last message to Claude?') && socket.send({ type: 'rewind', userMessageId: lastUser.userMessageId! })}
-        >
-          <svg width="15" height="15" viewBox="0 0 16 16" aria-hidden="true"><path d="M5.5 3L2.5 6L5.5 9M2.5 6H10A3.5 3.5 0 0 1 10 13H7" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" /></svg>
-        </button>
-        <div className="spacer" />
-        <div className="segmented">
-          <button className={view === 'canvas' ? 'on' : ''} onClick={() => setView('canvas')}>Canvas</button>
-          <button className={view === 'components' ? 'on' : ''} onClick={() => setView('components')}>Components</button>
-        </div>
-        <div className="spacer" />
-        <div style={{ position: 'relative' }}>
-          <button className="chip" onClick={() => setMenu(!menu)} title={`Claude Code ${caps?.claudeVersion ?? claude.version ?? ''}`}>
-            <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5L9.4 6.6L14.5 8L9.4 9.4L8 14.5L6.6 9.4L1.5 8L6.6 6.6Z" fill="#111" /></svg>
-            <b>{model?.displayName ?? s.model ?? 'Claude'}</b>
-            <span className="muted">· {s.effort ?? prefs.effort ?? 'auto effort'} · {modeInfo?.label ?? s.mode}</span>
-            {s.busy && <span className="status-dot wait" />}
+        <div className="pop-anchor">
+          <button className="chip" onClick={() => (project ? setProjectMenu(!projectMenu) : setModal('project'))} title={project?.path ?? 'Add a project'}>
+            {project ? (
+              <span className="chip-text">
+                <b>{project.name}</b>
+                <span className="sub">{git?.isRepo ? `${git.branch}${git.behind ? ` · ${git.behind} new from the team` : ''}` : 'Folder'}</span>
+              </span>
+            ) : (
+              <span className="chip-text">
+                <b>No project</b>
+                <span className="sub">Add one, or mention it in chat</span>
+              </span>
+            )}
+            <svg width="8" height="8" viewBox="0 0 8 8" aria-hidden="true"><path d="M1.5 3l2.5 2.5L6.5 3" fill="none" stroke="currentColor" strokeWidth="1.2" /></svg>
           </button>
-          {menu && caps && (
-            <div className="popover" style={{ right: 0, top: 38 }} onMouseLeave={() => setMenu(false)}>
-              <h4>Model</h4>
-              {caps.models.map((m) => (
-                <button key={m.value} className="opt" onClick={() => choose({ model: m.value })}>
-                  <span className="check">{m.value === model?.value ? '✓' : ''}</span>
-                  <span>
-                    {m.displayName}
-                    <small>{m.description}</small>
-                  </span>
-                </button>
-              ))}
-              {model && model.supportedEffortLevels.length > 0 && (
-                <>
-                  <h4>Effort</h4>
-                  <div className="efforts">
-                    {model.supportedEffortLevels.map((e) => (
-                      <button key={e} className={(s.effort ?? prefs.effort) === e ? 'on' : ''} onClick={() => choose({ effort: e })}>
-                        {e}
-                      </button>
-                    ))}
-                  </div>
-                </>
-              )}
-              <h4>Mode</h4>
-              {modes.map((m) => (
-                <button key={m.value} className="opt" onClick={() => choose({ mode: m.value })}>
-                  <span className="check">{m.value === modeInfo?.value ? '✓' : ''}</span>
-                  <span>
-                    {m.label}
-                    <small>{m.description}</small>
-                  </span>
-                </button>
-              ))}
-            </div>
+          {projectMenu && project && (
+            <Menu onClose={() => setProjectMenu(false)}>
+              <div className="menu-note mono">{project.path}</div>
+              <button className="opt" onClick={() => (setModal('project'), setProjectMenu(false))}>
+                <span>Open another project…</span>
+              </button>
+              <button className="opt" onClick={() => (ask('Work out how this project runs and start it so I can see it on the canvas.', false), setProjectMenu(false))}>
+                <span>Run it</span>
+              </button>
+              <button className="opt" onClick={() => (void api('/api/project/close', {}), setProjectMenu(false))}>
+                <span>Close project</span>
+              </button>
+            </Menu>
           )}
         </div>
+        <span className="spacer" />
         <button className="btn" onClick={() => setModal('figma')}>Import from Figma</button>
-        <button className="btn" onClick={() => gitAction('/api/git/latest', {})} disabled={!project.git.remote}>
-          Get latest {project.git.behind > 0 && <span className="badge dark">{project.git.behind}</span>}
-        </button>
-        <button className="btn" onClick={() => setModal('save')} disabled={!project.git.isRepo}>
-          Save version {changedCount > 0 && <span className="badge">{changedCount}</span>}
-        </button>
-        <button className="btn primary" onClick={() => setModal('share')} disabled={!project.git.remote}>Share for review</button>
+        {project ? (
+          <>
+            <button className="btn" onClick={() => gitAction('/api/git/latest', {})} disabled={!git?.remote} title="Pull what the team changed">
+              Get latest {git && git.behind > 0 && <span className="badge dark">{git.behind}</span>}
+            </button>
+            <button className="btn" onClick={() => setModal('save')} disabled={!git?.isRepo}>
+              Save version {git && git.changed.length > 0 && <span className="badge">{git.changed.length}</span>}
+            </button>
+            <button className="btn primary" onClick={() => setModal('share')} disabled={!git?.remote}>Share for review</button>
+          </>
+        ) : (
+          <button className="btn primary" onClick={() => setModal('project')}>Add project</button>
+        )}
       </div>
 
       <div className="body">
-        <div className="side">
+        <aside className="side left">
           <div className="tabs">
-            {(['chat', 'sessions', 'claude'] as LeftTab[]).map((t) => (
+            {(['chat', 'layers', 'components'] as LeftTab[]).map((t) => (
               <button key={t} className={left === t ? 'on' : ''} onClick={() => setLeft(t)}>
-                {t === 'chat' ? 'Chat' : t === 'sessions' ? 'Sessions' : 'Claude Code'}
+                {t === 'chat' ? 'Chat' : t === 'layers' ? 'Layers' : 'Components'}
               </button>
             ))}
           </div>
-          {capsError && <div className="error-box" style={{ margin: 8 }}>{capsError}</div>}
-          {left === 'chat' && <Chat chat={chat} commands={caps?.commands ?? []} context={context} clearContext={() => setContext(undefined)} />}
-          {left === 'sessions' && (
-            <SessionsPanel
-              session={s}
-              onResume={(id) => {
-                dispatch({ type: 'reset' });
-                socket.send({ type: 'start', resume: id, model: prefs.model, effort: prefs.effort, mode: prefs.mode });
-                setLeft('chat');
-              }}
-            />
-          )}
-          {left === 'claude' && <ClaudePanel caps={caps} onRefresh={() => loadCaps(true)} />}
-        </div>
-
-        {view === 'canvas' ? (
-          <Canvas appUrl={appUrl} scripts={project.scripts} running={starting === 'app'} onRunApp={() => runDev('app')} onAsk={(c) => (setContext(c), setLeft('chat'))} reloadKey={reloadKey} />
-        ) : (
-          <ComponentsView
-            stories={project.stories}
-            storybookUrl={storybookUrl}
-            hasScript={!!project.scripts.storybook}
-            starting={starting === 'storybook'}
-            onStart={() => runDev('storybook')}
-            onAsk={(t) => (t.startsWith('Context:') ? (setContext(t), setLeft('chat')) : ask(t))}
-            reloadKey={reloadKey}
-          />
-        )}
-
-        <div className="side right">
-          <div className="tabs">
-            <button className={right === 'design' ? 'on' : ''} onClick={() => setRight('design')}>Design</button>
-            <button className={right === 'changes' ? 'on' : ''} onClick={() => setRight('changes')}>
-              Changes {chat.changes.length > 0 && <span className="badge dark" style={{ display: 'inline-grid', marginLeft: 4 }}>{new Set(chat.changes.map((c) => c.path)).size}</span>}
-            </button>
+          {capsError && left === 'chat' && <div className="error-box" style={{ margin: 8 }}>{capsError}</div>}
+          <div className={`pane ${left === 'chat' ? '' : 'hidden'}`}>
+            {chatView === 'chat' && <Chat chat={chat} caps={caps} prefs={prefs} onChoose={choose} context={context} hasProject={!!project} suggestions={suggestions} header={chatHeader} />}
+            {chatView === 'history' && (
+              <div className="chat" data-canvas-keys="off">
+                {chatHeader}
+                <SessionsPanel session={s} onResume={(id) => newChat(id)} />
+              </div>
+            )}
+            {chatView === 'claude' && (
+              <div className="chat" data-canvas-keys="off">
+                {chatHeader}
+                <ClaudePanel caps={caps} onRefresh={() => loadCaps(true)} />
+              </div>
+            )}
           </div>
-          {right === 'design' ? (
-            <DesignPanel onAsk={ask} onChanged={() => (void refreshProject(), setReloadKey((k) => k + 1))} />
-          ) : (
-            <Changes changes={chat.changes} git={project.git} />
-          )}
-        </div>
+          <div className={`pane ${left === 'layers' ? '' : 'hidden'}`}>
+            <Adopt el={host.layersEl} />
+          </div>
+          <div className={`pane ${left === 'components' ? '' : 'hidden'}`} data-canvas-keys="off">
+            <ComponentsPanel project={project} storybookRunning={!!running.storybook} onPlace={(id) => placeStory(id)} onAsk={(p) => ask(p, false)} onAddProject={() => setModal('project')} />
+          </div>
+        </aside>
+
+        <main className="stage">
+          <Adopt el={host.stage} className="stage-host" />
+          <CanvasHint editor={editor} onFigma={() => setModal('figma')} onComponents={() => setLeft('components')} />
+        </main>
+
+        <aside className="side right">
+          <div className="side-switch">
+            <div className="segmented full" role="tablist" aria-label="Properties">
+              <button role="tab" aria-selected={side === 'figma'} className={side === 'figma' ? 'on' : ''} onClick={() => setSide('figma')}>
+                <svg width="12" height="12" viewBox="0 0 16 16" aria-hidden="true"><path d="M5 1.5v13M11 1.5v13M1.5 5h13M1.5 11h13" fill="none" stroke="currentColor" strokeWidth="1.3" /></svg>
+                Figma
+              </button>
+              <button role="tab" aria-selected={side === 'code'} className={side === 'code' ? 'on' : ''} onClick={() => setSide('code')}>
+                <svg width="12" height="12" viewBox="0 0 16 16" aria-hidden="true"><path d="M5.5 4.5L2 8l3.5 3.5M10.5 4.5L14 8l-3.5 3.5" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                Code
+                {changedFiles > 0 && <span className="badge dark">{changedFiles}</span>}
+              </button>
+            </div>
+          </div>
+          <div className={`pane ${side === 'figma' ? '' : 'hidden'}`}>
+            <div className="scroll">
+              <Adopt el={host.propsEl} />
+              <RenderedStyles editor={editor} />
+            </div>
+          </div>
+          <div className={`pane ${side === 'code' ? '' : 'hidden'}`} data-canvas-keys="off">
+            {hasSelection ? (
+              <CodePanel editor={editor} stories={project?.stories ?? []} onAsk={(p) => (p.endsWith(': ') ? (setLeft('chat'), setChatView('chat'), window.dispatchEvent(new CustomEvent('designer:focus-chat'))) : ask(p))} onShowStory={(id, next) => void placeStory(id, next)} />
+            ) : project ? (
+              <>
+                <div className="tabs sub">
+                  <button className={codeTab === 'changes' ? 'on' : ''} onClick={() => setCodeTab('changes')}>
+                    Changes {changedFiles > 0 && <span className="badge dark">{changedFiles}</span>}
+                  </button>
+                  <button className={codeTab === 'tokens' ? 'on' : ''} onClick={() => setCodeTab('tokens')}>Tokens</button>
+                </div>
+                {codeTab === 'tokens' ? <DesignPanel onAsk={(p) => ask(p, false)} onChanged={() => void refreshProject()} /> : <Changes changes={chat.changes} git={project.git} />}
+              </>
+            ) : (
+              <div className="empty">Select a layer to see it as code. Add a project to see its tokens and what changed.</div>
+            )}
+          </div>
+        </aside>
       </div>
 
+      {modal === 'project' && (
+        <div className="modal-back" onClick={() => setModal(null)}>
+          <div onClick={(e) => e.stopPropagation()}>
+            <ProjectPicker
+              home={status.home}
+              current={project?.path}
+              onCancel={() => setModal(null)}
+              onOpen={async (path) => {
+                await api<ProjectInfo>('/api/project', { path });
+                setModal(null);
+              }}
+            />
+          </div>
+        </div>
+      )}
       {modal === 'save' && (
         <TextModal
           title="Save version"
-          body="Saves everything that changed as a version you can come back to."
+          body="Saves everything that changed, the canvas included, as a version you can come back to."
           placeholder="What changed? e.g. Denser pricing cards"
           action="Save version"
           onClose={() => setModal(null)}
@@ -334,7 +417,7 @@ function Workspace({ project, setProject, claude, onSwitch, isMac }: { project: 
           onSubmit={(t) => gitAction('/api/git/share', { title: t })}
         />
       )}
-      {modal === 'figma' && <FigmaModal sessionRunning={s.running} onClose={() => setModal(null)} />}
+      {modal === 'figma' && <FigmaModal sessionRunning={s.running} onClose={() => (setModal(null), setLeft('chat'), setChatView('chat'))} />}
       {toast && (
         <div className="toast" onClick={() => setToast(undefined)}>
           {toast.text}
@@ -352,14 +435,45 @@ function Workspace({ project, setProject, claude, onSwitch, isMac }: { project: 
   );
 }
 
+/** Re-renders when the selection changes (not on every drag frame). */
+function useSelectionTick(editor: CanvasHost['editor']) {
+  const [, tick] = useReducer((x: number) => x + 1, 0);
+  useEffect(() => editor.store.on((ch) => (ch.has('selection') ? tick() : undefined)), [editor]);
+}
+
+/** Shows a DOM element owned by the canvas (layers, properties, the canvas itself) inside React's tree. */
+function Adopt({ el, className }: { el: HTMLElement; className?: string }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    ref.current?.append(el);
+  }, [el]);
+  return <div ref={ref} className={className} />;
+}
+
+function CanvasHint({ editor, onFigma, onComponents }: { editor: CanvasHost['editor']; onFigma: () => void; onComponents: () => void }) {
+  useCanvasTick(editor);
+  if (editor.store.doc.root.length) return null;
+  return (
+    <div className="canvas-hint">
+      <b>A blank canvas</b>
+      <span>Draw with the tools below (F frame, R rectangle, T text), drop an image, or bring something in:</span>
+      <div className="row-actions">
+        <button className="btn small" onClick={onFigma}>Import from Figma</button>
+        <button className="btn small" onClick={onComponents}>Place a component from code</button>
+        <button className="btn small" onClick={() => window.dispatchEvent(new CustomEvent('designer:focus-chat'))}>Ask Claude</button>
+      </div>
+    </div>
+  );
+}
+
 function TextModal({ title, body, placeholder, action, onClose, onSubmit }: { title: string; body: string; placeholder: string; action: string; onClose: () => void; onSubmit: (t: string) => void }) {
   const [text, setText] = useState('');
   return (
     <div className="modal-back" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
+      <div className="modal" onClick={(e) => e.stopPropagation()} data-canvas-keys="off">
         <h3>{title}</h3>
         <p>{body}</p>
-        <input className="input" style={{ width: '100%' }} autoFocus placeholder={placeholder} value={text} onChange={(e) => setText(e.target.value)} />
+        <input className="input" style={{ width: '100%' }} autoFocus placeholder={placeholder} value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && (onSubmit(text), onClose())} />
         <div className="actions">
           <button className="btn" onClick={onClose}>Cancel</button>
           <button className="btn primary" onClick={() => (onSubmit(text), onClose())}>{action}</button>
@@ -369,17 +483,24 @@ function TextModal({ title, body, placeholder, action, onClose, onSubmit }: { ti
   );
 }
 
-function localStorageGet(k: string) {
+function lsGet(k: string) {
   try {
     return localStorage.getItem(k);
   } catch {
     return null;
   }
 }
-function localStorageSet(k: string, v: string) {
+function lsSet(k: string, v: string) {
   try {
     localStorage.setItem(k, v);
   } catch {
     // Private windows can refuse storage; preferences just won't persist.
+  }
+}
+function lsDel(k: string) {
+  try {
+    localStorage.removeItem(k);
+  } catch {
+    // ignore
   }
 }

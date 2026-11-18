@@ -62,5 +62,7 @@ export function chatReducer(state: ChatState, m: ChatAction): ChatState {
     }
     case 'error':
       return { ...state, lastError: m.text };
+    default:
+      return state;
   }
 }

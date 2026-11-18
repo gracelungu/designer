@@ -1,16 +1,18 @@
 import { randomBytes } from 'node:crypto';
 import { createReadStream, existsSync } from 'node:fs';
-import { realpath, stat } from 'node:fs/promises';
+import { mkdir, readFile, realpath, stat, writeFile } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { homedir } from 'node:os';
-import { extname, join, normalize, resolve } from 'node:path';
+import { dirname, extname, join, normalize, resolve } from 'node:path';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { detectClaude, permissionModes } from './claude.js';
 import { ClaudeSession } from './session.js';
 import { listSessions } from './transcripts.js';
 import { findTokens, updateToken } from './tokens.js';
 import { DevProcess, diffFor, getLatest, listDir, projectInfo, readMemory, saveVersion, shareForReview, writeMemory } from './project.js';
-import type { Capabilities, ClaudeInstall, ClientMessage, ServerMessage } from '../shared/protocol.js';
+import { PreviewProxies } from './proxy.js';
+import { handleMcp, SYSTEM_PROMPT, type ToolHost } from './mcp.js';
+import type { Capabilities, CanvasOp, CanvasState, ClaudeInstall, ClientMessage, ServerMessage } from '../shared/protocol.js';
 
 export interface ServerOptions {
   port?: number;
@@ -19,6 +21,8 @@ export interface ServerOptions {
   initialProject?: string;
   /** Fixed token, for the Vite dev setup only. */
   token?: string;
+  /** Where Claude works before a project is open (default ~/Designer). */
+  workspace?: string;
 }
 
 /** Only answer requests addressed to loopback, which blocks DNS-rebinding pages. */
@@ -35,9 +39,14 @@ export async function startServer(opts: ServerOptions = {}) {
   let projectPath: string | undefined = opts.initialProject;
   let session: ClaudeSession | undefined;
   let capsCache: Capabilities | undefined;
+  let canvasState: CanvasState | undefined;
+  const workspace = opts.workspace ?? join(homedir(), 'Designer');
   const sockets = new Set<WebSocket>();
   const app = new DevProcess('dev');
   const storybook = new DevProcess('storybook');
+  const proxies = new PreviewProxies();
+  const waiting = new Map<string, (r: unknown) => void>();
+  let serverUrl = '';
 
   const broadcast = (m: ServerMessage) => {
     const data = JSON.stringify(m);
@@ -45,19 +54,94 @@ export async function startServer(opts: ServerOptions = {}) {
   };
 
   function requireProject() {
-    if (!projectPath) throw new HttpError(400, 'Open a project folder first.');
+    if (!projectPath) throw new HttpError(400, 'Add a project first.');
     return projectPath;
   }
+  /** Where Claude works: the open project, or Designer's own folder before there is one. */
+  const home = () => projectPath ?? workspace;
 
-  function ensureSession() {
-    const cwd = requireProject();
+  function ensureSession(cwd?: string) {
     if (!claude.found || !claude.path) throw new HttpError(400, claude.error ?? 'Claude Code not found');
-    if (!session || session.cwd !== cwd) {
+    if (!session || (cwd && session.cwd !== cwd)) {
       session?.stop();
-      session = new ClaudeSession(cwd, claude.path, broadcast);
+      session = new ClaudeSession(cwd ?? home(), claude.path, broadcast, {
+        systemPrompt: SYSTEM_PROMPT,
+        allowedTools: ['mcp__designer'],
+        servers: { designer: { type: 'http', url: `${serverUrl}/mcp`, headers: { 'x-designer-token': token } } },
+      });
+      if (!projectPath) session.note(`No project is open yet. You are in Designer's own folder (${workspace}); new projects made from scratch can go here.`);
     }
     return session;
   }
+
+  async function openProject(path: string, byClaude = false) {
+    const p = await realpath(resolve(path)).catch(() => resolve(path));
+    if (!(await stat(p).then((s) => s.isDirectory(), () => false))) throw new HttpError(400, `${p} is not a folder`);
+    if (p !== projectPath) {
+      app.stop();
+      storybook.stop();
+      projectPath = p;
+      if (session && session.cwd !== p && !byClaude) session.note(`The user opened the project at ${p}. Work in that folder from now on (use absolute paths, and cd there before running commands).`);
+    }
+    const info = await projectInfo(p);
+    broadcast({ type: 'project', project: info });
+    return info;
+  }
+
+  async function askCanvas(op: CanvasOp): Promise<unknown> {
+    if (![...sockets].some((s) => s.readyState === s.OPEN)) throw new Error('The Designer window is not open, so the canvas cannot be changed right now.');
+    const requestId = randomBytes(8).toString('hex');
+    return new Promise((done, fail) => {
+      const t = setTimeout(() => (waiting.delete(requestId), fail(new Error('The canvas did not answer in time.'))), 10000);
+      waiting.set(requestId, (r) => (clearTimeout(t), done(r)));
+      broadcast({ type: 'canvas-op', requestId, op });
+    });
+  }
+
+  async function runDev(kind: 'app' | 'storybook', command?: string) {
+    const cwd = requireProject();
+    const dev = kind === 'app' ? app : storybook;
+    const url = await dev.start(cwd, command);
+    broadcast({ type: 'run', kind, url });
+    return url;
+  }
+
+  async function storybookUrl() {
+    if (storybook.url) return storybook.url;
+    const info = await projectInfo(requireProject());
+    if (!info.scripts.storybook) throw new Error('Storybook is not running and this project has no "storybook" script. Start it with run_project (kind storybook), or set Storybook up first.');
+    return runDev('storybook');
+  }
+
+  const tools: ToolHost = {
+    openProject: async (path) => {
+      const info = await openProject(path, true);
+      const scripts = Object.entries(info.scripts).map(([k, v]) => `  ${k}: ${v}`).join('\n') || '  (none)';
+      return `Opened ${info.path}.\nGit: ${info.git.isRepo ? `${info.git.branch ?? ''}${info.git.remote ? ` (remote ${info.git.remote})` : ' (no remote)'}` : 'not a git repository'}\nScripts:\n${scripts}\nStorybook stories: ${info.stories.reduce((n, s) => n + s.stories.length, 0)} in ${info.stories.length} files.\nNote: your own working folder is still ${session?.cwd ?? home()}; use absolute paths or cd into the project.`;
+    },
+    runProject: async (command, kind) => {
+      try {
+        const url = await runDev(kind, command);
+        return `${kind === 'app' ? 'The app' : 'Storybook'} is running at ${url} and is on the canvas.`;
+      } catch (e) {
+        throw new Error(`Could not start it: ${(e as Error).message}`, { cause: e });
+      }
+    },
+    canvasState: () => canvasState,
+    addNodes: (nodes, nextToSelection) => askCanvas({ kind: 'add-nodes', nodes: nodes as never, nextToSelection, select: true }),
+    updateNodes: (updates) => askCanvas({ kind: 'update-nodes', updates: updates as never }),
+    showComponent: async (storyId, args, nextToSelection) => {
+      if (!storyId) throw new Error('Give a story id.');
+      const sb = await storybookUrl();
+      const src = await proxies.url(`${sb}/iframe.html?id=${encodeURIComponent(storyId)}&viewMode=story`);
+      const stories = projectPath ? (await projectInfo(projectPath)).stories : [];
+      const entry = stories.find((e) => e.stories.some((s) => s.id === storyId));
+      const story = entry?.stories.find((s) => s.id === storyId);
+      const title = entry ? `${entry.title.split('/').pop()}${story && entry.stories.length > 1 ? ` / ${story.name}` : ''}` : storyId;
+      const r = await askCanvas({ kind: 'show-component', storyId, title, src, args, nextToSelection, file: entry?.file });
+      return `Placed ${title} on the canvas, rendered live from code. ${JSON.stringify(r)}`;
+    },
+  };
 
   async function capabilities(): Promise<Capabilities> {
     const s = ensureSession();
@@ -67,36 +151,36 @@ export async function startServer(opts: ServerOptions = {}) {
     return capsCache;
   }
 
+  async function canvasFile() {
+    const dir = projectPath ? join(projectPath, '.designer') : workspace;
+    return join(dir, 'canvas.json');
+  }
+
   const routes: Record<string, (body: Record<string, unknown>, url: URL) => Promise<unknown>> = {
-    'GET /api/status': async () => ({ claude, project: projectPath ?? null, home: homedir(), platform: process.platform }),
+    'GET /api/status': async () => ({ claude, project: projectPath ?? null, home: homedir(), workspace, platform: process.platform }),
     'POST /api/claude/recheck': async () => {
       claude = await detectClaude();
       return claude;
     },
     'GET /api/fs': async (_b, url) => listDir(resolve(url.searchParams.get('path') || homedir())),
-    'POST /api/project': async (body) => {
-      const p = await realpath(resolve(String(body.path ?? ''))).catch(() => resolve(String(body.path ?? '')));
-      if (!(await stat(p).then((s) => s.isDirectory(), () => false))) throw new HttpError(400, `${p} is not a folder`);
-      if (p !== projectPath) {
-        session?.stop();
-        session = undefined;
-        capsCache = undefined;
-        app.stop();
-        storybook.stop();
-      }
-      projectPath = p;
-      return projectInfo(p);
+    'POST /api/project': async (body) => openProject(String(body.path ?? '')),
+    'POST /api/project/close': async () => {
+      app.stop();
+      storybook.stop();
+      projectPath = undefined;
+      broadcast({ type: 'project', project: null });
+      return { ok: true };
     },
-    'GET /api/project': async () => projectInfo(requireProject()),
+    'GET /api/project': async () => (projectPath ? projectInfo(projectPath) : null),
     'GET /api/capabilities': async () => capsCache ?? capabilities(),
     'POST /api/capabilities/refresh': async () => capabilities(),
     'GET /api/sessions': async () => {
-      return listSessions(requireProject());
+      return listSessions(home());
     },
-    'GET /api/memory': async () => readMemory(requireProject()),
+    'GET /api/memory': async () => readMemory(home()),
     'POST /api/memory': async (body) => {
-      await writeMemory(requireProject(), String(body.path), String(body.content ?? ''));
-      return readMemory(requireProject());
+      await writeMemory(home(), String(body.path), String(body.content ?? ''));
+      return readMemory(home());
     },
     'GET /api/tokens': async () => findTokens(requireProject()),
     'POST /api/tokens': async (body) => {
@@ -108,9 +192,24 @@ export async function startServer(opts: ServerOptions = {}) {
     'POST /api/git/latest': async () => getLatest(requireProject()),
     'POST /api/git/save': async (body) => saveVersion(requireProject(), String(body.message ?? '')),
     'POST /api/git/share': async (body) => shareForReview(requireProject(), String(body.title ?? '')),
-    'POST /api/run/app': async () => ({ url: await app.start(requireProject()) }),
-    'POST /api/run/storybook': async () => ({ url: await storybook.start(requireProject()) }),
+    'POST /api/run/app': async (body) => ({ url: await runDev('app', body.command ? String(body.command) : undefined) }),
+    'POST /api/run/storybook': async (body) => ({ url: await runDev('storybook', body.command ? String(body.command) : undefined) }),
     'GET /api/run': async () => ({ app: app.url ?? null, storybook: storybook.url ?? null }),
+    'GET /api/preview': async (_b, url) => ({ src: await proxies.url(String(url.searchParams.get('url') ?? '')) }),
+    'GET /api/story-src': async (_b, url) => {
+      const sb = await storybookUrl();
+      return { src: await proxies.url(`${sb}/iframe.html?id=${encodeURIComponent(String(url.searchParams.get('id') ?? ''))}&viewMode=story`) };
+    },
+    'GET /api/canvas': async () => {
+      const f = await canvasFile();
+      return { path: f, data: await readFile(f, 'utf8').then((t) => JSON.parse(t) as unknown, () => null) };
+    },
+    'POST /api/canvas': async (body) => {
+      const f = await canvasFile();
+      await mkdir(dirname(f), { recursive: true });
+      await writeFile(f, JSON.stringify(body.data ?? null, null, 1));
+      return { ok: true, path: f };
+    },
     'GET /api/figma/status': async (_b, url) => {
       const target = url.searchParams.get('url') || 'http://127.0.0.1:3845/mcp';
       try {
@@ -146,11 +245,35 @@ export async function startServer(opts: ServerOptions = {}) {
     }
   }
 
+  async function handleMcpHttp(req: IncomingMessage, res: ServerResponse) {
+    if (req.headers['x-designer-token'] !== token) return json(res, 403, { error: 'Missing or wrong token' });
+    if (req.method === 'DELETE') return json(res, 200, {});
+    if (req.method !== 'POST') {
+      res.writeHead(405, { allow: 'POST' });
+      return res.end();
+    }
+    const chunks: Buffer[] = [];
+    for await (const c of req) chunks.push(c as Buffer);
+    let body: unknown;
+    try {
+      body = JSON.parse(Buffer.concat(chunks).toString() || 'null');
+    } catch {
+      return json(res, 400, { jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error' } });
+    }
+    const out = await handleMcp(body, tools);
+    if (out === null) {
+      res.writeHead(202);
+      return res.end();
+    }
+    return json(res, 200, out);
+  }
+
   const staticDir = opts.staticDir && existsSync(opts.staticDir) ? opts.staticDir : undefined;
   const server = createServer(async (req, res) => {
     if (!isLoopbackHost(req.headers.host)) return json(res, 403, { error: 'Designer only answers on localhost' });
     const url = new URL(req.url ?? '/', `http://${req.headers.host}`);
     if (url.pathname.startsWith('/api/')) return handleApi(req, res, url);
+    if (url.pathname === '/mcp') return handleMcpHttp(req, res);
     if (!staticDir) return json(res, 404, { error: 'UI not built. Run npm run build, or use npm run dev.' });
     let file = normalize(join(staticDir, decodeURIComponent(url.pathname)));
     if (!file.startsWith(staticDir) || !(await stat(file).then((s) => s.isFile(), () => false))) file = join(staticDir, 'index.html');
@@ -196,14 +319,27 @@ export async function startServer(opts: ServerOptions = {}) {
 
   async function handleMessage(ws: WebSocket, msg: ClientMessage) {
       try {
+        if (msg.type === 'canvas-state') {
+          canvasState = msg.state;
+          return;
+        }
+        if (msg.type === 'canvas-result') {
+          const done = waiting.get(msg.requestId);
+          waiting.delete(msg.requestId);
+          done?.(msg.result);
+          return;
+        }
+        if (msg.type === 'start') {
+          // Continuing this conversation keeps its folder; a new chat starts in the open project.
+          const cwd = msg.resume && session?.sessionId === msg.resume ? session.cwd : home();
+          await ensureSession(cwd).start({ resume: msg.resume, model: msg.model, effort: msg.effort, mode: msg.mode });
+          return;
+        }
         const s = ensureSession();
         switch (msg.type) {
-          case 'start':
-            await s.start({ resume: msg.resume, model: msg.model, effort: msg.effort, mode: msg.mode });
-            break;
           case 'prompt':
             if (!s.running) await s.start({ model: s.model, effort: s.effort, mode: s.mode, resume: s.sessionId });
-            s.prompt(msg.text);
+            s.prompt(msg.text, msg.attachments, msg.context);
             break;
           case 'interrupt':
             await s.interrupt();
@@ -232,13 +368,16 @@ export async function startServer(opts: ServerOptions = {}) {
       }
   }
 
+  await mkdir(workspace, { recursive: true }).catch(() => undefined);
   await new Promise<void>((r) => server.listen(opts.port ?? 0, host, r));
   const addr = server.address();
   const port = typeof addr === 'object' && addr ? addr.port : 0;
+  serverUrl = `http://${host}:${port}`;
   const close = () => {
     session?.stop();
     app.stop();
     storybook.stop();
+    proxies.closeAll();
     wss.close();
     server.close();
   };

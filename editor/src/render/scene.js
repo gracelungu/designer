@@ -141,6 +141,14 @@ export function nodeSVG(store, n, defs, exporting = false) {
       inner = `<foreignObject x="${n.x}" y="${n.y}" width="${Math.max(1, n.w)}" height="${Math.max(1, n.h)}" style="overflow:visible"><div xmlns="http://www.w3.org/1999/xhtml" style="${hidden}width:${Math.max(1, n.w)}px;height:${Math.max(1, n.h)}px;display:flex;flex-direction:column;justify-content:${va}"><div style="${attr(textCSS(n))}">${content}</div></div></foreignObject>`;
       break;
     }
+    case 'code': {
+      // The live render sits in the code layer above the scene; the scene keeps a box for exports and hit areas.
+      const label = escapeHTML(n.code?.title || n.name);
+      inner = exporting
+        ? `<rect x="${n.x}" y="${n.y}" width="${n.w}" height="${n.h}" fill="#F4F4F5" stroke="#D4D4D8"/><text x="${n.x + 8}" y="${n.y + 18}" font-size="12" font-family="Inter, sans-serif" fill="#52525B">${label}</text>`
+        : `<rect x="${n.x}" y="${n.y}" width="${Math.max(1, n.w)}" height="${Math.max(1, n.h)}" fill="transparent"/>`;
+      break;
+    }
     default: {
       const d = pathFor(n);
       const open = n.type === 'line' || n.type === 'arrow' || (n.type === 'vector' && !n.closed);
