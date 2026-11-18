@@ -9,7 +9,7 @@ import { detectClaude, permissionModes } from './claude.js';
 import { ClaudeSession } from './session.js';
 import { listSessions } from './transcripts.js';
 import { findTokens, updateToken } from './tokens.js';
-import { DevProcess, diffFor, getLatest, listDir, projectInfo, readMemory, saveVersion, shareForReview, writeMemory } from './project.js';
+import { DevProcess, diffFor, findRunningStorybook, getLatest, listDir, projectInfo, readMemory, saveVersion, shareForReview, writeMemory } from './project.js';
 import { PreviewProxies } from './proxy.js';
 import { handleMcp, SYSTEM_PROMPT, type ToolHost } from './mcp.js';
 import { FigmaClient, figmaStatus, parseOutline } from './figma.js';
@@ -101,6 +101,11 @@ export async function startServer(opts: ServerOptions = {}) {
   }
 
   async function runDev(kind: 'app' | 'storybook', command?: string) {
+    if (kind === 'storybook' && !command?.trim()) return storybookUrl();
+    return startDev(kind, command);
+  }
+
+  async function startDev(kind: 'app' | 'storybook', command?: string) {
     const cwd = requireProject();
     const dev = kind === 'app' ? app : storybook;
     const url = await dev.start(cwd, command);
@@ -109,10 +114,26 @@ export async function startServer(opts: ServerOptions = {}) {
   }
 
   async function storybookUrl() {
+    const cwd = requireProject();
+    if (storybook.url && storybook.adopted) {
+      // Still up? The user may have stopped their own Storybook since.
+      const alive = await fetch(`${storybook.url}/index.json`, { signal: AbortSignal.timeout(1500) }).then((r) => r.ok, () => false);
+      if (alive) return storybook.url;
+      storybook.stop();
+    }
     if (storybook.url) return storybook.url;
-    const info = await projectInfo(requireProject());
+    const info = await projectInfo(cwd);
+    const running = await findRunningStorybook(
+      info.stories.map((s) => s.file),
+      info.scripts.storybook,
+    );
+    if (running) {
+      storybook.adopt(cwd, running);
+      broadcast({ type: 'run', kind: 'storybook', url: running });
+      return running;
+    }
     if (!info.scripts.storybook) throw new Error('Storybook is not running and this project has no "storybook" script. Start it with run_project (kind storybook), or set Storybook up first.');
-    return runDev('storybook');
+    return startDev('storybook');
   }
 
   const tools: ToolHost = {

@@ -210,9 +210,47 @@ export function findLocalUrl(text: string): string | undefined {
   return m ? m[0].replace(/[/.]+$/, '') : undefined;
 }
 
+/** Ports a Storybook for this project might already be on: the one in its script, then Storybook's defaults. */
+export function storybookPorts(script?: string): number[] {
+  const m = script ? /(?:-p|--port)[\s=]+(\d{2,5})/.exec(script) : null;
+  return [...new Set([...(m ? [Number(m[1])] : []), 6006, 6007, 6008, 6009])];
+}
+
+/**
+ * Finds a Storybook that is already running for this project (say, in the user's own terminal),
+ * so Designer can use it instead of starting a second copy. It only counts as this project's
+ * when its story index lists story files that this project has.
+ */
+export async function findRunningStorybook(projectFiles: string[], script?: string, hosts = ['127.0.0.1', 'localhost']): Promise<string | undefined> {
+  const norm = (f: string) => f.replace(/\\/g, '/').replace(/^\.\//, '');
+  const mine = projectFiles.map(norm);
+  if (!mine.length) return undefined;
+  const ours = (importPath: string) => {
+    const p = norm(importPath);
+    return mine.some((f) => f === p || f.endsWith(`/${p}`) || p.endsWith(`/${f}`));
+  };
+  for (const port of storybookPorts(script)) {
+    for (const host of hosts) {
+      const base = `http://${host}:${port}`;
+      try {
+        const r = await fetch(`${base}/index.json`, { signal: AbortSignal.timeout(1200) });
+        if (!r.ok) continue;
+        const idx = (await r.json()) as { entries?: Record<string, { importPath?: string }> };
+        if (Object.values(idx.entries ?? {}).some((e) => e.importPath && ours(e.importPath))) return base;
+        break; // a Storybook, but another project's
+      } catch {
+        // nothing on this host and port
+      }
+    }
+  }
+  return undefined;
+}
+
 export class DevProcess {
   proc?: ChildProcess;
   url?: string;
+  /** Set when the server was already running (started outside Designer): we use it and never stop it. */
+  adopted = false;
   command?: string;
   cwd?: string;
   log: string[] = [];
@@ -221,6 +259,7 @@ export class DevProcess {
   start(cwd: string, command?: string): Promise<string> {
     const cmd = command?.trim() || `npm run ${this.script}`;
     if (this.proc && this.url && this.cwd === cwd && this.command === cmd) return Promise.resolve(this.url);
+    if (this.adopted && this.url && this.cwd === cwd && !command) return Promise.resolve(this.url);
     this.stop();
     this.command = cmd;
     this.cwd = cwd;
@@ -255,10 +294,18 @@ export class DevProcess {
   tail(lines = 12) {
     return this.log.join('').split('\n').slice(-lines).join('\n');
   }
+  /** Use a server that is already running (not ours to stop). */
+  adopt(cwd: string, url: string) {
+    this.stop();
+    this.cwd = cwd;
+    this.url = url;
+    this.adopted = true;
+  }
   stop() {
     const p = this.proc;
     this.proc = undefined;
     this.url = undefined;
+    this.adopted = false;
     if (!p) return;
     try {
       // Dev servers start children of their own; stop the whole group.
