@@ -74,9 +74,10 @@ export const ICONS = {
   link: s('<path d="M6.5 9.5l3-3M7 4.5l1-1a2.5 2.5 0 0 1 3.5 3.5l-1 1M9 11.5l-1 1A2.5 2.5 0 0 1 4.5 9l1-1"/>'),
   keyboard: s('<rect x="1.5" y="4" width="13" height="8" rx="1.5"/><path d="M4 6.5h.5M6.5 6.5H7M9 6.5h.5M11.5 6.5h.5M4.5 9.5h7"/>'),
   check: s('<path d="M3 8.5l3 3 7-7"/>'),
+  code: s('<path d="M5.5 4.5L2 8l3.5 3.5M10.5 4.5L14 8l-3.5 3.5"/>'),
 };
 
 export const LAYER_ICON = (n) => {
   if (n.type === 'frame' && n.layout) return n.layout.mode === 'horizontal' ? ICONS.layoutH : ICONS.layoutV;
-  return { frame: ICONS.frame, section: ICONS.section, group: ICONS.group, rect: ICONS.rect, ellipse: ICONS.ellipse, line: ICONS.line, arrow: ICONS.arrow, polygon: ICONS.polygon, star: ICONS.star, vector: ICONS.vector, text: ICONS.text, image: ICONS.image }[n.type] || ICONS.rect;
+  return { frame: ICONS.frame, section: ICONS.section, group: ICONS.group, rect: ICONS.rect, ellipse: ICONS.ellipse, line: ICONS.line, arrow: ICONS.arrow, polygon: ICONS.polygon, star: ICONS.star, vector: ICONS.vector, text: ICONS.text, image: ICONS.image, code: ICONS.code }[n.type] || ICONS.rect;
 };

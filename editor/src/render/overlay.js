@@ -129,7 +129,7 @@ function outline(editor, n, color = SEL, width = 1) {
   const store = editor.store;
   const m = G.multiply(editor.viewMatrix(), store.matrix(n.id));
   let d;
-  if (n.type === 'group' || n.type === 'text' || isFrameLike(n) || n.type === 'image') d = `M${n.x} ${n.y}h${n.w}v${n.h}h${-n.w}Z`;
+  if (n.type === 'group' || n.type === 'text' || isFrameLike(n) || n.type === 'image' || n.type === 'code') d = `M${n.x} ${n.y}h${n.w}v${n.h}h${-n.w}Z`;
   else d = pathFor(n);
   return `<path d="${d}" transform="${G.toSVG(m)}" fill="none" stroke="${color}" stroke-width="${width}" vector-effect="non-scaling-stroke"/>`;
 }

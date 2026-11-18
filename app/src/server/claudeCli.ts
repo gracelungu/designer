@@ -14,6 +14,10 @@ export interface CliOptions {
   effort?: string;
   permissionMode?: string;
   resume?: string;
+  /** Added to Claude Code's own system prompt. */
+  appendSystemPrompt?: string;
+  /** Tools that never ask for permission (e.g. Designer's own MCP tools). */
+  allowedTools?: string[];
   /** Hook matchers to register: event -> [{ matcher, id }]. Callbacks arrive through onHook. */
   hooks?: Record<string, { matcher: string; id: string }[]>;
   onMessage: (m: CliMessage) => void;
@@ -23,7 +27,7 @@ export interface CliOptions {
 }
 
 /** Command-line arguments for a headless, stream-json Claude Code session. */
-export function buildArgs(o: Pick<CliOptions, 'model' | 'effort' | 'permissionMode' | 'resume'>): string[] {
+export function buildArgs(o: Pick<CliOptions, 'model' | 'effort' | 'permissionMode' | 'resume' | 'appendSystemPrompt' | 'allowedTools'>): string[] {
   const args = [
     '-p',
     '--input-format', 'stream-json',
@@ -39,6 +43,8 @@ export function buildArgs(o: Pick<CliOptions, 'model' | 'effort' | 'permissionMo
   if (o.permissionMode && o.permissionMode !== 'default') args.push('--permission-mode', o.permissionMode);
   if (o.permissionMode === 'bypassPermissions') args.push('--allow-dangerously-skip-permissions');
   if (o.resume) args.push('--resume', o.resume);
+  if (o.appendSystemPrompt) args.push('--append-system-prompt', o.appendSystemPrompt);
+  if (o.allowedTools?.length) args.push('--allowedTools', o.allowedTools.join(','));
   return args;
 }
 
@@ -98,8 +104,9 @@ export class ClaudeCli {
     });
   }
 
-  sendUser(text: string) {
-    this.write({ type: 'user', session_id: '', parent_tool_use_id: null, message: { role: 'user', content: text } });
+  /** Sends a user turn: plain text, or content blocks (text plus images). */
+  sendUser(content: string | Record<string, unknown>[]) {
+    this.write({ type: 'user', session_id: '', parent_tool_use_id: null, message: { role: 'user', content } });
   }
 
   private onLine(line: string) {

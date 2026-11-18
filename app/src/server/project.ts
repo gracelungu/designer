@@ -213,21 +213,29 @@ export function findLocalUrl(text: string): string | undefined {
 export class DevProcess {
   proc?: ChildProcess;
   url?: string;
+  command?: string;
+  cwd?: string;
   log: string[] = [];
   constructor(readonly script: string) {}
-  start(cwd: string): Promise<string> {
-    if (this.proc && this.url) return Promise.resolve(this.url);
+  /** Starts a dev server and resolves with the first local URL it prints. Any shell command works; the default is `npm run <script>`. */
+  start(cwd: string, command?: string): Promise<string> {
+    const cmd = command?.trim() || `npm run ${this.script}`;
+    if (this.proc && this.url && this.cwd === cwd && this.command === cmd) return Promise.resolve(this.url);
+    this.stop();
+    this.command = cmd;
+    this.cwd = cwd;
+    this.log = [];
     return new Promise((resolveUrl, reject) => {
-      const p = spawn(process.platform === 'win32' ? 'npm.cmd' : 'npm', ['run', this.script], { cwd, env: { ...process.env, BROWSER: 'none', FORCE_COLOR: '0', PYTHONUNBUFFERED: '1' } });
+      const p = spawn(cmd, { cwd, shell: true, detached: process.platform !== 'win32', env: { ...process.env, BROWSER: 'none', FORCE_COLOR: '0', PYTHONUNBUFFERED: '1' } });
       this.proc = p;
-      const timer = setTimeout(() => reject(new Error(`"npm run ${this.script}" did not print a local URL within 90 seconds.`)), 90000);
+      const timer = setTimeout(() => reject(new Error(`"${cmd}" did not print a local URL within 90 seconds.\n${this.tail()}`)), 90000);
       const onData = (d: Buffer) => {
         // eslint-disable-next-line no-control-regex
         const text = d.toString().replace(/\x1b\[[0-9;]*m/g, '');
         this.log.push(text);
         if (this.log.length > 300) this.log.shift();
         const m = findLocalUrl(text);
-        if (m && !this.url) {
+        if (m && !this.url && this.proc === p) {
           this.url = m;
           clearTimeout(timer);
           resolveUrl(this.url);
@@ -237,15 +245,27 @@ export class DevProcess {
       p.stderr?.on('data', onData);
       p.on('exit', (code) => {
         clearTimeout(timer);
+        if (this.proc !== p) return;
         this.proc = undefined;
         this.url = undefined;
-        reject(new Error(`"npm run ${this.script}" exited with code ${code}.\n${this.log.slice(-10).join('')}`));
+        reject(new Error(`"${cmd}" exited with code ${code}.\n${this.tail()}`));
       });
     });
   }
+  tail(lines = 12) {
+    return this.log.join('').split('\n').slice(-lines).join('\n');
+  }
   stop() {
-    this.proc?.kill();
+    const p = this.proc;
     this.proc = undefined;
     this.url = undefined;
+    if (!p) return;
+    try {
+      // Dev servers start children of their own; stop the whole group.
+      if (p.pid && process.platform !== 'win32') process.kill(-p.pid, 'SIGTERM');
+      else p.kill();
+    } catch {
+      p.kill();
+    }
   }
 }

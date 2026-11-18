@@ -34,6 +34,14 @@ The chat works through the CLI's own controls:
 - **Rewind** uses `rewind_files`, with file checkpointing turned on.
 - **Before and After** for each edit come from `PreToolUse` and `PostToolUse` hook callbacks.
 
+## Design and code on one canvas
+
+- **No project needed to start.** Designer opens straight into a chat and a blank canvas. Add a project from the menu, or just name one in the chat; Claude opens it and works out how to run it.
+- **Designer's own MCP server.** The server exposes `/mcp` (guarded by a per-run token) with `open_project`, `run_project`, `get_canvas`, `add_to_canvas`, `update_layers` and `show_component`, and registers it with Claude Code through `mcp_set_servers`. Figma's desktop MCP server joins the same list when connected.
+- **Live components, not whole Storybooks.** Each local dev server gets a loopback preview proxy that injects a small probe. For a story, the probe strips Storybook's padding and background, sizes the frame to the component (Hug) or to a fixed size, and reports props, sizes and rendered styles. Components sit on the canvas as `code` layers beside design layers, so both read the same.
+- **Figma | Code properties.** The right panel switches between design properties (plus the rendered styles of a code layer, in Figma terms) and code properties (component props, size, a JSX snippet, or the CSS and code link of a design layer).
+- The canvas is saved to `<project>/.designer/canvas.json`, or `~/Designer/canvas.json` with no project.
+
 ## Run it as a local server
 
 You need Node 20 or newer, and Claude Code installed and signed in.

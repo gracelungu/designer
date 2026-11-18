@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { isAbsolute, relative, resolve } from 'node:path';
 import { ClaudeCli, type CliMessage } from './claudeCli.js';
 import { sessionEntries } from './transcripts.js';
-import type { Capabilities, ChatItem, PermissionMode, ServerMessage } from '../shared/protocol.js';
+import type { Attachment, Capabilities, ChatItem, PermissionMode, ServerMessage } from '../shared/protocol.js';
 
 const EDIT_TOOLS = ['Edit', 'Write', 'MultiEdit', 'NotebookEdit'];
 
@@ -39,8 +39,25 @@ export function summarizeTool(name: string, input: Record<string, unknown>, cwd:
       return `Use skill ${String(input.skill ?? input.command ?? '')}`;
     case 'ExitPlanMode':
       return 'Plan ready for approval';
+    case 'mcp__designer__open_project':
+      return `Open the project ${String(input.path ?? '')}`;
+    case 'mcp__designer__run_project':
+      return `${input.kind === 'storybook' ? 'Start Storybook' : 'Run the project'} with \`${String(input.command ?? '')}\``;
+    case 'mcp__designer__get_canvas':
+      return 'Look at the canvas';
+    case 'mcp__designer__add_to_canvas': {
+      const count = Array.isArray(input.nodes) ? input.nodes.length : 0;
+      return `Add ${count === 1 ? 'a layer' : `${count} layers`} to the canvas`;
+    }
+    case 'mcp__designer__update_layers': {
+      const count = Array.isArray(input.updates) ? input.updates.length : 0;
+      return `Change ${count === 1 ? 'a layer' : `${count} layers`} on the canvas`;
+    }
+    case 'mcp__designer__show_component':
+      return `Show ${String(input.storyId ?? 'a component')} on the canvas`;
     default:
-      return name.startsWith('mcp__') ? `${name.split('__')[1]}: ${name.split('__').slice(2).join('__')}` : name;
+      if (name.startsWith('mcp__figma')) return `Read Figma (${name.split('__').slice(2).join('__').replace(/_/g, ' ')})`;
+      return name.startsWith('mcp__') ? `${name.split('__')[1]}: ${name.split('__').slice(2).join('__').replace(/_/g, ' ')}` : name;
   }
 }
 
@@ -53,6 +70,11 @@ function textOf(content: unknown): string {
   return '';
 }
 
+
+/** Removes Designer's own lead lines ("[Designer] ...") from a message as Claude saw it. */
+export function stripNotes(text: string) {
+  return text.replace(/^(\[Designer\][^\n]*\n)+\n?/, '').trim();
+}
 
 type Decision = { behavior: 'allow' } | { behavior: 'deny'; message: string };
 
@@ -77,11 +99,29 @@ export class ClaudeSession {
   mode: PermissionMode = 'default';
   busy = false;
 
+  /** MCP servers this session adds to the user's own (Designer's tools, the Figma desktop server). */
+  private servers: Record<string, Record<string, unknown>> = {};
+  /** Said to Claude at the start of the next message, e.g. that the user opened a project. */
+  private notes: string[] = [];
+
   constructor(
     readonly cwd: string,
     private readonly claudePath: string,
     private readonly send: (m: ServerMessage) => void,
-  ) {}
+    private readonly extras: { systemPrompt?: string; servers?: Record<string, Record<string, unknown>>; allowedTools?: string[] } = {},
+  ) {
+    this.servers = { ...(extras.servers ?? {}) };
+  }
+
+  note(text: string) {
+    this.notes.push(text);
+  }
+
+  private async applyServers() {
+    if (!this.cli || !Object.keys(this.servers).length) return;
+    const r = (await this.cli.request({ subtype: 'mcp_set_servers', servers: this.servers }).catch((e: Error) => ({ errors: { designer: e.message } }))) as { errors?: Record<string, string> };
+    if (r.errors && Object.keys(r.errors).length) this.send({ type: 'item', item: { kind: 'system', id: randomUUID(), text: `Some tools could not connect: ${Object.entries(r.errors).map(([k, v]) => `${k} (${v})`).join(', ')}` } });
+  }
 
   get running() {
     return !!this.cli && !this.cli.closed;
@@ -105,6 +145,8 @@ export class ClaudeSession {
       effort: this.effort,
       permissionMode: this.mode,
       resume: opts.resume,
+      appendSystemPrompt: this.extras.systemPrompt,
+      allowedTools: this.extras.allowedTools,
       hooks: {
         PreToolUse: [{ matcher: EDIT_TOOLS.join('|'), id: 'before-edit' }],
         PostToolUse: [{ matcher: EDIT_TOOLS.join('|'), id: 'after-edit' }],
@@ -126,6 +168,7 @@ export class ClaudeSession {
     this.cli = cli;
     this.status();
     await cli.ready;
+    await this.applyServers();
   }
 
   private async onHook(id: string, input: Record<string, unknown>, toolUseId?: string) {
@@ -153,7 +196,7 @@ export class ClaudeSession {
       for (const e of entries) {
         if (e.isSidechain || !e.uuid || !e.message) continue;
         if (e.type === 'user') {
-          const text = textOf(e.message.content);
+          const text = stripNotes(textOf(e.message.content));
           if (text && !text.startsWith('<')) items.push({ kind: 'user', id: e.uuid, text, userMessageId: e.uuid });
         } else if (e.type === 'assistant' && Array.isArray(e.message.content)) {
           (e.message.content as { type: string; text?: string; name?: string; id?: string; input?: Record<string, unknown> }[]).forEach((b, i) => {
@@ -191,14 +234,31 @@ export class ClaudeSession {
     done(allow ? { behavior: 'allow' } : { behavior: 'deny', message: message || 'The designer declined this step.' });
   }
 
-  prompt(text: string) {
+  /** Sends the user's message. `context` (what's selected on the canvas, say) goes to Claude but shows as a chip. */
+  prompt(text: string, attachments: Attachment[] = [], context?: string) {
     if (!this.cli) throw new Error('No session running');
     const id = randomUUID();
     this.pendingUserIds.push(id);
-    this.send({ type: 'item', item: { kind: 'user', id, text } });
+    this.send({
+      type: 'item',
+      item: { kind: 'user', id, text, context, attachments: attachments.map((a) => ({ name: a.name, mediaType: a.mediaType, preview: a.mediaType.startsWith('image/') ? `data:${a.mediaType};base64,${a.data}` : undefined })) },
+    });
     this.busy = true;
     this.status();
-    this.cli.sendUser(text);
+    const notes = this.notes.splice(0);
+    const lead = [...notes.map((n) => `[Designer] ${n}`), context ? `[Designer] ${context}` : ''].filter(Boolean).join('\n');
+    const full = lead && !text.startsWith('/') ? `${lead}\n\n${text}` : text;
+    if (!attachments.length) {
+      this.cli.sendUser(full);
+      return;
+    }
+    const blocks: Record<string, unknown>[] = [];
+    for (const a of attachments) {
+      if (a.mediaType.startsWith('image/')) blocks.push({ type: 'image', source: { type: 'base64', media_type: a.mediaType, data: a.data } });
+      else blocks.push({ type: 'text', text: `<file name="${a.name}">\n${a.data}\n</file>` });
+    }
+    blocks.push({ type: 'text', text: full });
+    this.cli.sendUser(blocks);
   }
 
   private need() {
@@ -223,7 +283,8 @@ export class ClaudeSession {
   }
 
   async connectFigma(url: string) {
-    const r = (await this.need().request({ subtype: 'mcp_set_servers', servers: { figma: { type: 'http', url } } })) as { errors?: Record<string, string> };
+    this.servers.figma = { type: 'http', url };
+    const r = (await this.need().request({ subtype: 'mcp_set_servers', servers: this.servers })) as { errors?: Record<string, string> };
     const ok = !r.errors || Object.keys(r.errors).length === 0;
     this.send({ type: 'item', item: { kind: 'system', id: randomUUID(), text: ok ? 'Figma desktop MCP server connected to this Claude session.' : `Figma MCP: ${JSON.stringify(r.errors)}` } });
   }
@@ -317,7 +378,8 @@ export class ClaudeSession {
       const message = m.message as { content: unknown };
       if (m.isReplay) {
         const localId = this.pendingUserIds.shift();
-        if (localId && m.uuid) this.send({ type: 'item', item: { kind: 'user', id: localId, text: textOf(message.content), userMessageId: m.uuid as string } });
+        // Text stays as shown; Claude's copy also carries the canvas context.
+        if (localId && m.uuid) this.send({ type: 'item', item: { kind: 'user', id: localId, text: '', userMessageId: m.uuid as string } });
         return;
       }
       if (m.parent_tool_use_id || !Array.isArray(message.content)) return;

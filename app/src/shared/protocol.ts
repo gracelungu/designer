@@ -104,10 +104,64 @@ export interface FileChange {
   after: string;
 }
 
+/** An image or text file attached to a chat message. */
+export interface Attachment {
+  name: string;
+  mediaType: string;
+  /** Base64 for images, plain text for text files. */
+  data: string;
+}
+
+/**
+ * Layers in a simple, Figma-like shape that Claude writes (from a Figma file, or from scratch)
+ * and the canvas turns into editable layers.
+ */
+export interface SimpleNode {
+  type: 'frame' | 'group' | 'rect' | 'ellipse' | 'line' | 'text' | 'image' | 'component';
+  name?: string;
+  x?: number;
+  y?: number;
+  w?: number;
+  h?: number;
+  fill?: string;
+  stroke?: string;
+  strokeWidth?: number;
+  radius?: number | [number, number, number, number];
+  opacity?: number;
+  rotation?: number;
+  clip?: boolean;
+  shadow?: { x?: number; y?: number; blur?: number; spread?: number; color?: string; opacity?: number };
+  text?: { content: string; fontFamily?: string; fontSize?: number; fontWeight?: number; color?: string; align?: 'left' | 'center' | 'right'; lineHeight?: number; letterSpacing?: number; italic?: boolean };
+  layout?: { mode: 'horizontal' | 'vertical'; gap?: number; padding?: number | [number, number, number, number]; align?: 'start' | 'center' | 'end' | 'space-between'; counterAlign?: 'start' | 'center' | 'end' | 'stretch' };
+  sizing?: { h?: 'fixed' | 'hug' | 'fill'; v?: 'fixed' | 'hug' | 'fill' };
+  imageUrl?: string;
+  /** For type component: a Storybook story id, rendered live from the repo's code. */
+  storyId?: string;
+  args?: Record<string, unknown>;
+  /** Links a design layer to the coded component that implements it. */
+  codeLink?: { storyId?: string; file?: string; exportName?: string };
+  children?: SimpleNode[];
+}
+
+export type CanvasOp =
+  | { kind: 'add-nodes'; nodes: SimpleNode[]; nextToSelection?: boolean; select?: boolean }
+  | { kind: 'update-nodes'; updates: (Partial<SimpleNode> & { id: string })[] }
+  | { kind: 'show-component'; storyId: string; title: string; src: string; args?: Record<string, unknown>; nextToSelection?: boolean; file?: string }
+  | { kind: 'show-page'; url: string; src: string; name: string; width: number; height: number }
+  | { kind: 'select'; ids: string[] };
+
+/** What the canvas tells Claude about itself: the selection in detail and the top-level layers in brief. */
+export interface CanvasState {
+  selection: unknown[];
+  layers: { id: string; name: string; type: string; x: number; y: number; w: number; h: number; children?: number }[];
+}
+
 // ----- WebSocket: client -> server -----
 export type ClientMessage =
   | { type: 'start'; resume?: string; model?: string; effort?: string; mode?: PermissionMode }
-  | { type: 'prompt'; text: string }
+  | { type: 'prompt'; text: string; attachments?: Attachment[]; context?: string }
+  | { type: 'canvas-state'; state: CanvasState }
+  | { type: 'canvas-result'; requestId: string; result: unknown }
   | { type: 'interrupt' }
   | { type: 'set-model'; model: string }
   | { type: 'set-mode'; mode: PermissionMode }
@@ -118,7 +172,7 @@ export type ClientMessage =
 
 // ----- WebSocket: server -> client -----
 export type ChatItem =
-  | { kind: 'user'; id: string; text: string; userMessageId?: string }
+  | { kind: 'user'; id: string; text: string; userMessageId?: string; attachments?: { name: string; mediaType: string; preview?: string }[]; context?: string }
   | { kind: 'assistant'; id: string; text: string; streaming?: boolean }
   | { kind: 'thinking'; id: string; text: string }
   | { kind: 'tool'; id: string; name: string; summary: string; input: unknown; status: 'running' | 'done' | 'error'; output?: string }
@@ -134,4 +188,7 @@ export type ServerMessage =
   | { type: 'file-change'; change: FileChange }
   | { type: 'rewound'; userMessageId: string; dryRun: boolean; result: { canRewind: boolean; error?: string; filesChanged?: string[]; insertions?: number; deletions?: number } }
   | { type: 'history'; items: ChatItem[] }
+  | { type: 'project'; project: ProjectInfo | null }
+  | { type: 'run'; kind: 'app' | 'storybook'; url: string }
+  | { type: 'canvas-op'; requestId: string; op: CanvasOp }
   | { type: 'error'; text: string };
