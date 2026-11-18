@@ -1,0 +1,90 @@
+{
+  "name": "designer",
+  "version": "0.1.0",
+  "description": "A Figma-style canvas for your real codebase, driven by the Claude Code installed on your computer.",
+  "license": "Apache-2.0",
+  "private": true,
+  "type": "module",
+  "main": "electron/main.cjs",
+  "bin": {
+    "designer": "dist/server/cli.mjs"
+  },
+  "author": "Grace Lungu",
+  "homepage": "https://github.com/gracelungu/designer",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "concurrently -k -n server,web \"npm:dev:server\" \"npm:dev:web\"",
+    "dev:server": "npm run build:server && DESIGNER_TOKEN=dev node dist/server/cli.mjs --no-open --port 4818",
+    "dev:web": "vite",
+    "build": "npm run build:web && npm run build:server",
+    "build:web": "vite build",
+    "build:server": "esbuild src/server/cli.ts src/server/index.ts --bundle --platform=node --format=esm --target=node20 --outdir=dist/server --out-extension:.js=.mjs --packages=external",
+    "start": "node dist/server/cli.mjs",
+    "electron": "npm run build && electron .",
+    "dist:mac": "npm run build && electron-builder --mac --publish never",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "ws": "^8.23.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^26.6.6",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@types/ws": "^8.18.2",
+    "@vitejs/plugin-react": "^6.3.0",
+    "concurrently": "^10.0.7",
+    "electron": "^45.3.4",
+    "electron-builder": "^26.18.0",
+    "esbuild": "^0.28.2",
+    "eslint": "^10.15.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.73.0",
+    "vite": "^8.3.8",
+    "vitest": "^5.1.1"
+  },
+  "build": {
+    "appId": "dev.designer.app",
+    "productName": "Designer",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "electron/**",
+      "dist/**",
+      "package.json"
+    ],
+    "asar": true,
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ],
+      "identity": null,
+      "hardenedRuntime": false
+    },
+    "artifactName": "${productName}-${version}-${arch}.${ext}"
+  }
+}
