@@ -373,3 +373,23 @@ textarea.memory { width: 100%; min-height: 160px; border: 1px solid var(--line-2
 .layer-tokens { border-top: 1px solid var(--line); padding-bottom: 6px; }
 .lt-token { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
 .lt-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Automatic project setup */
+.setup-card { position: absolute; left: 12px; bottom: 64px; width: 330px; max-width: calc(100% - 24px); background: var(--bg); border: 1px solid var(--line-2); border-radius: 10px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12); padding: 8px 6px 8px 12px; z-index: 20; }
+.setup-head { display: flex; align-items: center; gap: 8px; }
+.setup-head .toast-close { color: var(--faint); }
+.setup-head .toast-close:hover { background: var(--bg-2); color: var(--text); }
+.setup-title { flex: 1; min-width: 0; border: 0; background: none; padding: 2px 0; text-align: left; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+.setup-spin { width: 12px; height: 12px; border: 2px solid var(--line-2); border-top-color: var(--text); border-radius: 50%; animation: toast-spin 0.8s linear infinite; flex: none; }
+.setup-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; margin: 0 2px; background: #1a9b5b; }
+.setup-dot.failed { background: var(--del-text); }
+.setup-steps { list-style: none; margin: 6px 0 0; padding: 0 6px 0 0; display: grid; gap: 3px; }
+.setup-steps li { display: grid; grid-template-columns: 14px 1fr; column-gap: 6px; color: var(--muted); line-height: 1.4; }
+.setup-steps li.running .label, .setup-steps li.done .label { color: var(--text); }
+.setup-steps li.failed .label, .setup-steps li.failed .mark { color: var(--del-text); }
+.setup-steps .mark { text-align: center; font-size: 11px; }
+.setup-steps li.done .mark { color: #1a9b5b; }
+.setup-steps .detail { grid-column: 2; font-size: 11px; color: var(--faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.setup-error { margin: 8px 6px 0 0; max-height: 120px; overflow: auto; font-size: 11px; white-space: pre-wrap; color: var(--del-text); background: var(--del); padding: 6px 8px; border-radius: 6px; }
+.setup-actions { display: flex; gap: 6px; justify-content: flex-end; margin: 8px 6px 0 0; }
+.comp-section { padding: 10px 12px 4px; font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.comp-props { padding: 0 8px 6px 34px; color: var(--faint); font-size: 11px; line-height: 1.45; }

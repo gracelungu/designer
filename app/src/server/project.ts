@@ -3,6 +3,7 @@ import { readFile, readdir, stat, writeFile, mkdir } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, join, relative, sep } from 'node:path';
 import { promisify } from 'node:util';
+import { indexComponents } from './setup.js';
 import type { GitStatus, MemoryFile, ProjectInfo, StoryEntry } from '../shared/protocol.js';
 
 const run = promisify(execFile);
@@ -115,7 +116,8 @@ export async function projectInfo(cwd: string): Promise<ProjectInfo> {
   const pkg = await readFile(join(cwd, 'package.json'), 'utf8')
     .then((t) => JSON.parse(t) as { name?: string; scripts?: Record<string, string> })
     .catch(() => ({}) as { name?: string; scripts?: Record<string, string> });
-  return { path: cwd, name: basename(cwd), git: await gitStatus(cwd), scripts: pkg.scripts ?? {}, stories: await findStories(cwd) };
+  const stories = await findStories(cwd);
+  return { path: cwd, name: basename(cwd), git: await gitStatus(cwd), scripts: pkg.scripts ?? {}, stories, components: await indexComponents(cwd, stories) };
 }
 
 export function memoryPaths(cwd: string, home = homedir()) {
@@ -264,7 +266,7 @@ export class DevProcess {
   log: string[] = [];
   constructor(readonly script: string) {}
   /** Starts a dev server and resolves with the first local URL it prints. Any shell command works; the default is `npm run <script>`. */
-  start(cwd: string, command?: string): Promise<string> {
+  start(cwd: string, command?: string, env: Record<string, string> = {}): Promise<string> {
     // Storybook asks yes/no questions in a terminal (e.g. "Port 6006 is not available, use 6007?"). Nobody
     // can answer them here, so run it with --ci: it then takes the next free port and never waits for input.
     const cmd = command?.trim() || (this.script === 'storybook' ? 'npm run storybook -- --ci' : `npm run ${this.script}`);
@@ -275,7 +277,7 @@ export class DevProcess {
     this.cwd = cwd;
     this.log = [];
     return new Promise((resolveUrl, reject) => {
-      const p = spawn(cmd, { cwd, shell: true, detached: process.platform !== 'win32', env: { ...process.env, BROWSER: 'none', FORCE_COLOR: '0', PYTHONUNBUFFERED: '1' } });
+      const p = spawn(cmd, { cwd, shell: true, detached: process.platform !== 'win32', env: { ...process.env, BROWSER: 'none', FORCE_COLOR: '0', PYTHONUNBUFFERED: '1', ...env } });
       this.proc = p;
       const timer = setTimeout(() => reject(new Error(`"${cmd}" did not print a local URL within 3 minutes.\n${this.tail()}`)), 180000);
       const onData = (d: Buffer) => {

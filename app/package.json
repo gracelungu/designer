@@ -27,7 +27,8 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "test": "vitest run",
-    "smoke:ui": "npm run build && vitest run --config vitest.ui.config.ts"
+    "smoke:ui": "npm run build && vitest run --config vitest.ui.config.ts",
+    "test:smoke": "DESIGNER_SMOKE_REAL=1 vitest run test/smoke-setup.test.ts test/smoke-real.test.ts"
   },
   "dependencies": {
     "ws": "^8.23.0"

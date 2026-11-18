@@ -1,0 +1,1 @@
+{ "name": "angular-yarn", "packageManager": "yarn@4.1.0", "scripts": { "ng": "ng", "start": "ng serve", "build": "ng build" }, "dependencies": { "@angular/core": "18.0.0" } }

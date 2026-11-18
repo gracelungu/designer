@@ -94,6 +94,71 @@ export interface ProjectInfo {
   git: GitStatus;
   scripts: Record<string, string>;
   stories: StoryEntry[];
+  /** Reusable components found in the source, with their props, linked to their stories. */
+  components: ComponentEntry[];
+}
+
+export type PackageManager = 'npm' | 'pnpm' | 'yarn' | 'bun';
+export type FrameworkId = 'next' | 'nuxt' | 'remix' | 'react-router' | 'astro' | 'sveltekit' | 'gatsby' | 'angular' | 'cra' | 'vite' | 'parcel' | 'webpack' | 'node' | 'unknown';
+
+export interface ComponentProp {
+  name: string;
+  type?: string;
+  optional: boolean;
+  default?: string;
+}
+
+export interface ComponentEntry {
+  name: string;
+  /** Path relative to the project. */
+  file: string;
+  /** The export to import it by ("default" for a default export). */
+  exportName: string;
+  framework: 'react' | 'vue' | 'svelte';
+  props: ComponentProp[];
+  /** Storybook story ids that render it; empty when it has no story yet. */
+  storyIds: string[];
+}
+
+/** How a project runs, worked out from its files. */
+export interface ProjectPlan {
+  framework: FrameworkId;
+  frameworkName: string;
+  packageManager: PackageManager;
+  packageManagerReason: string;
+  /** Folder of the app to run, relative to the project ("." or e.g. "apps/web" in a monorepo). */
+  appDir: string;
+  /** Where dependencies get installed (the workspace root in a monorepo). */
+  installDir: string;
+  devScript?: string;
+  devCommand?: string;
+  installCommand?: string;
+  needsInstall: boolean;
+  portEnv: boolean;
+  portFlag: boolean;
+  asksWhenPortBusy: boolean;
+  hasStorybook: boolean;
+  notes: string[];
+}
+
+export type SetupStepId = 'detect' | 'index' | 'install' | 'start' | 'storybook';
+export interface SetupStep {
+  id: SetupStepId;
+  label: string;
+  status: 'pending' | 'running' | 'done' | 'skipped' | 'failed';
+  detail?: string;
+}
+
+/** Progress of the automatic setup that runs when a project is added. */
+export interface SetupState {
+  project: string;
+  status: 'running' | 'done' | 'failed';
+  plan?: ProjectPlan;
+  steps: SetupStep[];
+  appUrl?: string;
+  storybookUrl?: string;
+  components: number;
+  error?: string;
 }
 
 export interface FileChange {
@@ -190,5 +255,6 @@ export type ServerMessage =
   | { type: 'history'; items: ChatItem[] }
   | { type: 'project'; project: ProjectInfo | null }
   | { type: 'run'; kind: 'app' | 'storybook'; url: string }
+  | { type: 'setup'; setup: SetupState | null }
   | { type: 'canvas-op'; requestId: string; op: CanvasOp }
   | { type: 'error'; text: string };

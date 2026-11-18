@@ -12,6 +12,8 @@ import { findTokens, updateToken } from './tokens.js';
 import { importVariables, pullFromFigma, setLink, tokenReport, useFigmaValue } from './designTokens.js';
 import { DevProcess, diffFor, findRunningStorybook, getLatest, listDir, projectInfo, readMemory, saveVersion, shareForReview, writeMemory } from './project.js';
 import { PreviewProxies } from './proxy.js';
+import { AutoSetup } from './autosetup.js';
+import { planProject } from './setup.js';
 import { handleMcp, SYSTEM_PROMPT, type ToolHost } from './mcp.js';
 import { FigmaClient, figmaStatus, parseOutline } from './figma.js';
 import type { Capabilities, CanvasOp, CanvasState, ClaudeInstall, ClientMessage, ServerMessage } from '../shared/protocol.js';
@@ -27,6 +29,10 @@ export interface ServerOptions {
   workspace?: string;
   /** Where to look for Figma's desktop MCP server (tests point this at a stand-in). */
   figmaUrls?: string[];
+  /** Set up and run a project as soon as it is added (default true). */
+  autoSetup?: boolean;
+  /** Replaces dependency installation (tests). */
+  install?: (command: string, cwd: string) => Promise<void>;
 }
 
 /** Only answer requests addressed to loopback, which blocks DNS-rebinding pages. */
@@ -40,7 +46,7 @@ export async function startServer(opts: ServerOptions = {}) {
   const host = opts.host ?? '127.0.0.1';
   const token = opts.token ?? randomBytes(24).toString('hex');
   let claude: ClaudeInstall = await detectClaude();
-  let projectPath: string | undefined = opts.initialProject;
+  let projectPath: string | undefined;
   let session: ClaudeSession | undefined;
   let capsCache: Capabilities | undefined;
   let canvasState: CanvasState | undefined;
@@ -49,6 +55,7 @@ export async function startServer(opts: ServerOptions = {}) {
   const app = new DevProcess('dev');
   const storybook = new DevProcess('storybook');
   const proxies = new PreviewProxies();
+  const setup = new AutoSetup();
   let figma: FigmaClient | undefined;
   const waiting = new Map<string, (r: unknown) => void>();
   let serverUrl = '';
@@ -79,10 +86,12 @@ export async function startServer(opts: ServerOptions = {}) {
     return session;
   }
 
-  async function openProject(path: string, byClaude = false) {
+  async function openProject(path: string, byClaude = false, autoRun = opts.autoSetup !== false) {
     const p = await realpath(resolve(path)).catch(() => resolve(path));
     if (!(await stat(p).then((s) => s.isDirectory(), () => false))) throw new HttpError(400, `${p} is not a folder`);
-    if (p !== projectPath) {
+    const isNew = p !== projectPath;
+    if (isNew) {
+      setup.cancel();
       app.stop();
       storybook.stop();
       projectPath = p;
@@ -90,7 +99,20 @@ export async function startServer(opts: ServerOptions = {}) {
     }
     const info = await projectInfo(p);
     broadcast({ type: 'project', project: info });
+    if (isNew) broadcast({ type: 'setup', setup: null });
+    // Zero-config: work out how it runs, install, start it and get its components ready, in the background.
+    if (autoRun && (isNew || setup.state?.status === 'failed')) void autoSetup(p);
     return info;
+  }
+
+  function autoSetup(p: string) {
+    return setup.run(p, {
+      app,
+      install: opts.install,
+      publish: (state) => broadcast({ type: 'setup', setup: state }),
+      onAppUrl: (url) => broadcast({ type: 'run', kind: 'app', url }),
+      warmStorybook: () => storybookUrl(),
+    });
   }
 
   async function askCanvas(op: CanvasOp): Promise<unknown> {
@@ -143,7 +165,9 @@ export async function startServer(opts: ServerOptions = {}) {
     openProject: async (path) => {
       const info = await openProject(path, true);
       const scripts = Object.entries(info.scripts).map(([k, v]) => `  ${k}: ${v}`).join('\n') || '  (none)';
-      return `Opened ${info.path}.\nGit: ${info.git.isRepo ? `${info.git.branch ?? ''}${info.git.remote ? ` (remote ${info.git.remote})` : ' (no remote)'}` : 'not a git repository'}\nScripts:\n${scripts}\nStorybook stories: ${info.stories.reduce((n, s) => n + s.stories.length, 0)} in ${info.stories.length} files.\nNote: your own working folder is still ${session?.cwd ?? home()}; use absolute paths or cd into the project.`;
+      const plan = await planProject(info.path);
+      const comps = info.components.slice(0, 40).map((c) => `  ${c.name} (${c.file}${c.storyIds.length ? `, stories: ${c.storyIds.join(', ')}` : ', no story'})`).join('\n');
+      return `Opened ${info.path}. Designer is now installing (if needed) and starting it by itself; do not start it again unless the user asks.\nFramework: ${plan.frameworkName}, package manager: ${plan.packageManager}, app folder: ${plan.appDir}, dev command: ${plan.devCommand ?? 'none found'}.\nComponents (${info.components.length}):\n${comps || '  (none found)'}\nGit: ${info.git.isRepo ? `${info.git.branch ?? ''}${info.git.remote ? ` (remote ${info.git.remote})` : ' (no remote)'}` : 'not a git repository'}\nScripts:\n${scripts}\nStorybook stories: ${info.stories.reduce((n, s) => n + s.stories.length, 0)} in ${info.stories.length} files.\nNote: your own working folder is still ${session?.cwd ?? home()}; use absolute paths or cd into the project.`;
     },
     runProject: async (command, kind) => {
       try {
@@ -199,8 +223,10 @@ export async function startServer(opts: ServerOptions = {}) {
       return claude;
     },
     'GET /api/fs': async (_b, url) => listDir(resolve(url.searchParams.get('path') || homedir())),
-    'POST /api/project': async (body) => openProject(String(body.path ?? '')),
+    'POST /api/project': async (body) => openProject(String(body.path ?? ''), false, body.setup === false ? false : undefined),
     'POST /api/project/close': async () => {
+      setup.cancel();
+      broadcast({ type: 'setup', setup: null });
       app.stop();
       storybook.stop();
       projectPath = undefined;
@@ -208,6 +234,10 @@ export async function startServer(opts: ServerOptions = {}) {
       return { ok: true };
     },
     'GET /api/project': async () => (projectPath ? projectInfo(projectPath) : null),
+    'GET /api/project/setup': async () => setup.state ?? null,
+    'POST /api/project/setup': async () => autoSetup(requireProject()),
+    'GET /api/project/plan': async () => planProject(requireProject()),
+    'GET /api/components': async () => (await projectInfo(requireProject())).components,
     'GET /api/capabilities': async () => capsCache ?? capabilities(),
     'POST /api/capabilities/refresh': async () => capabilities(),
     'GET /api/sessions': async () => {
@@ -387,6 +417,7 @@ export async function startServer(opts: ServerOptions = {}) {
   wss.on('connection', (ws: WebSocket) => {
     sockets.add(ws);
     ws.on('close', () => sockets.delete(ws));
+    if (setup.state) ws.send(JSON.stringify({ type: 'setup', setup: setup.state } satisfies ServerMessage));
     if (session) ws.send(JSON.stringify({ type: 'session', sessionId: session.sessionId, model: session.model, effort: session.effort, mode: session.mode, running: session.running, busy: session.busy } satisfies ServerMessage));
     // Handle one message at a time, so "start" finishes before the "prompt" sent right after it.
     let chain: Promise<void> = Promise.resolve();
@@ -457,7 +488,9 @@ export async function startServer(opts: ServerOptions = {}) {
   const addr = server.address();
   const port = typeof addr === 'object' && addr ? addr.port : 0;
   serverUrl = `http://${host}:${port}`;
+  if (opts.initialProject) await openProject(opts.initialProject).catch(() => undefined);
   const close = () => {
+    setup.cancel();
     session?.stop();
     app.stop();
     storybook.stop();
