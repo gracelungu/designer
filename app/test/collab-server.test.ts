@@ -138,6 +138,8 @@ describe('Share for review with the preview', () => {
     git(bare, 'init', '-q', '--bare', '-b', 'main');
     const repo = tmp();
     git(repo, 'init', '-q', '-b', 'main');
+    git(repo, 'config', 'user.name', 'Grace');
+    git(repo, 'config', 'user.email', 'grace@example.com');
     // A GitHub-looking remote that really pushes to a local bare repository.
     git(repo, 'config', `url.${bare}.pushInsteadOf`, 'https://github.com/grace/shop.git');
     git(repo, 'remote', 'add', 'origin', 'https://github.com/grace/shop.git');
