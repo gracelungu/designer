@@ -419,3 +419,22 @@ textarea.memory { width: 100%; min-height: 160px; border: 1px solid var(--line-2
 .update-pill { height: 26px; padding: 0 10px; border-radius: 13px; border: 1px solid var(--line-2); background: var(--bg); display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text); }
 .update-pill.ready { background: var(--primary); color: var(--on-primary); border-color: var(--primary); }
 .update-pill .dot { width: 6px; height: 6px; border-radius: 3px; background: currentColor; opacity: 0.7; }
+/* ----- Design <-> code sync ----- */
+.sync-bar { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); z-index: 20; display: flex; align-items: center; gap: 10px; padding: 7px 8px 7px 12px; border: 0; border-radius: 10px; background: #1e1e1e; color: #fff; font: inherit; font-size: 12px; cursor: pointer; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18); white-space: nowrap; }
+.sync-bar b { background: #fff; color: #111; border-radius: 6px; padding: 3px 8px; font-weight: 600; }
+.sync-bar .toast-spin { margin-top: 0; }
+.sync-panel .chat-head { position: sticky; top: 0; background: var(--panel, #fff); z-index: 1; }
+.sync-card { margin: 6px 8px; padding: 10px; border: 1px solid var(--line, #e5e5e5); border-radius: 8px; display: flex; flex-direction: column; gap: 6px; }
+.sync-card-head { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+.sync-card-head .toast-spin { border-color: rgba(0, 0, 0, 0.15); border-top-color: #111; margin-top: 0; }
+.sync-card .cp-actions { padding: 0; }
+.sync-summary { white-space: pre-wrap; line-height: 1.45; }
+.sync-layer { all: unset; cursor: pointer; font-weight: 600; display: flex; gap: 8px; align-items: baseline; overflow: hidden; text-overflow: ellipsis; }
+.sync-changes { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.sync-changes li { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.sync-label { min-width: 84px; color: var(--muted, #666); }
+.sync-val { display: inline-flex; align-items: center; gap: 4px; }
+.sync-val .swatch { width: 12px; height: 12px; border-radius: 3px; border: 1px solid rgba(0, 0, 0, 0.15); display: inline-block; }
+.sync-changes li { display: grid; grid-template-columns: 92px 1fr; align-items: center; gap: 6px; }
+.sync-move { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
+.sync-card .file-change header { flex-wrap: wrap; }

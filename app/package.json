@@ -31,7 +31,8 @@
     "test:smoke:setup": "DESIGNER_SMOKE_REAL=1 vitest run test/smoke-setup.test.ts test/smoke-real.test.ts",
     "test:e2e": "vitest run --config vitest.e2e.config.ts",
     "test:smoke": "npm run build && node test/smoke/electron-smoke.mjs",
-    "test:all": "npm run typecheck && npm run lint && npm test && npm run build && npm run test:e2e && node ../editor/tests/e2e.cjs"
+    "test:all": "npm run typecheck && npm run lint && npm test && npm run build && npm run test:e2e && node ../editor/tests/e2e.cjs",
+    "test:smoke:sync": "node test/e2e/sync-smoke.mjs"
   },
   "dependencies": {
     "electron-updater": "^6.8.11",

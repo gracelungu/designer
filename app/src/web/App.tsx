@@ -16,6 +16,8 @@ import { SetupCard } from './components/SetupCard';
 import { canvasHost, reconnectLive, type CanvasHost } from './canvas/host';
 import { Onboarding, type StartChoice } from './components/Onboarding';
 import { UpdatePill } from './components/UpdatePill';
+import { SyncBar, SyncPanel } from './components/SyncPanel';
+import { SyncController } from './sync/controller';
 
 interface Status {
   claude: ClaudeInstall;
@@ -115,6 +117,12 @@ function Workspace({ status, start }: { status: Status; start?: StartChoice }) {
   const host = hostRef.current;
   const editor = host.editor;
   useSelectionTick(editor);
+  const syncRef = useRef<SyncController>(undefined);
+  if (!syncRef.current) syncRef.current = new SyncController({ store: editor.store, measure: (id) => host.measureStory(id), reloadLive: () => host.reloadLive(), api });
+  const sync = syncRef.current;
+  const [syncOpen, setSyncOpen] = useState(false);
+  // For automated checks (the smoke test drives the canvas through this).
+  (window as unknown as { __designer?: unknown }).__designer = { host, sync };
 
   const loadCaps = useCallback((refresh = false) => {
     setCapsError('');
@@ -146,6 +154,19 @@ function Workspace({ status, start }: { status: Status; start?: StartChoice }) {
         if (m.kind === 'app') void host.showPage(m.url);
         return;
       }
+      if (m.type === 'sync') {
+        sync.onJob(m.job);
+        if (m.job.status === 'review') {
+          setSide('code');
+          setSyncOpen(true);
+        }
+        return;
+      }
+      if (m.type === 'code-changed') {
+        void refreshProject();
+        void sync.onCodeChanged(m.change);
+        return;
+      }
       if (m.type === 'canvas-op') {
         void host.apply(m.op).then(
           (result) => socket.send({ type: 'canvas-result', requestId: m.requestId, result }),
@@ -174,6 +195,7 @@ function Workspace({ status, start }: { status: Status; start?: StartChoice }) {
         }
       }
       await host.load();
+      void sync.loadJobs();
       const r = await api<{ app: string | null; storybook: string | null }>('/api/run').catch(() => ({ app: null, storybook: null }));
       setRunning(r);
       socket.send({ type: 'start', model: prefs.model, effort: prefs.effort, mode: prefs.mode });
@@ -395,6 +417,7 @@ function Workspace({ status, start }: { status: Status; start?: StartChoice }) {
 
         <main className="stage">
           <Adopt el={host.stage} className="stage-host" />
+          <SyncBar sync={sync} onOpen={() => (setSide('code'), setSyncOpen(true))} />
           <CanvasHint editor={editor} onFigma={() => setModal('figma')} onComponents={() => setLeft('components')} />
           <SetupCard setup={setup} onRetry={() => void api('/api/project/setup', {}).catch(() => undefined)} onAsk={(p) => ask(p, false)} />
         </main>
@@ -426,7 +449,9 @@ function Workspace({ status, start }: { status: Status; start?: StartChoice }) {
             </div>
           </div>
           <div className={`pane ${side === 'code' ? '' : 'hidden'}`} data-canvas-keys="off">
-            {project ? (
+            {syncOpen ? (
+              <SyncPanel sync={sync} onClose={() => setSyncOpen(false)} onSelect={(id) => (editor.store.select([id]), editor.zoomToSelection())} />
+            ) : project ? (
               <>
                 <div className="tabs sub">
                   {hasSelection && (
@@ -440,6 +465,7 @@ function Workspace({ status, start }: { status: Status; start?: StartChoice }) {
                   <button className={codeTab === 'tokens' ? 'on' : ''} onClick={() => setCodeTab('tokens')}>
                     Tokens {drift > 0 && <span className="badge">{drift}</span>}
                   </button>
+                  <button onClick={() => setSyncOpen(true)}>Sync</button>
                 </div>
                 {codeTab === 'layer' && hasSelection ? (
                   codePanel
