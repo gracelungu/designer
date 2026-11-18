@@ -1,4 +1,4 @@
-// Comment (C): click to pin a comment; pins follow the layer they were dropped on.
+// Comment (C): click to pin a comment; pins follow the frame they were dropped on.
 // Shift+C shows or hides comments outside comment mode.
 
 import * as G from '../core/geometry.js';
@@ -20,10 +20,18 @@ export class CommentTool {
       this.editor.comments.close();
       return;
     }
-    const chain = hitTest(this.store, p, 2);
-    const nodeId = chain ? chain[chain.length - 1] : null;
-    this.editor.comments.startDraft(p, nodeId);
+    this.editor.comments.startDraft(p, pinTarget(this.store, hitTest(this.store, p, 2)));
   }
+}
+
+/** The layer a comment pins to: the innermost frame (or live component) under the click, else the layer hit. */
+export function pinTarget(store, chain) {
+  if (!chain || !chain.length) return null;
+  for (let i = chain.length - 1; i >= 0; i--) {
+    const n = store.get(chain[i]);
+    if (n && (n.type === 'frame' || n.type === 'code')) return n.id;
+  }
+  return chain[chain.length - 1];
 }
 
 export class CommentLayer {
@@ -35,6 +43,8 @@ export class CommentLayer {
     this.draft = null;
     this.openId = null;
     this.showAlways = false;
+    /** Name shown on new comments and replies; the host sets it (Designer uses the git user name). */
+    this.author = 'You';
   }
   get store() { return this.editor.store; }
   get visible() { return this.store.tool === 'comment' || this.showAlways; }
@@ -61,6 +71,22 @@ export class CommentLayer {
     setTimeout(() => this.el.querySelector('textarea')?.focus(), 0);
   }
   closeDraft() { this.draft = null; }
+  /** Opens a comment's thread, showing comments and bringing its pin into view. */
+  open(id) {
+    const c = this.store.doc.comments.find((x) => x.id === id);
+    if (!c) return;
+    this.draft = null;
+    this.openId = id;
+    this.showAlways = true;
+    const a = this.anchor(c);
+    const v = this.editor.viewRect();
+    if (a.x < v.x || a.y < v.y || a.x > v.x + v.w - 300 || a.y > v.y + v.h) {
+      const z = this.store.view.zoom;
+      const r = this.editor.rect();
+      this.store.setView({ zoom: z, x: r.width / 2 - 150 - a.x * z, y: r.height / 2 - a.y * z });
+    }
+    this.render();
+  }
   close() { this.draft = null; this.openId = null; this.render(); }
 
   post(text) {
@@ -70,11 +96,16 @@ export class CommentLayer {
     const comments = store.doc.comments;
     const num = comments.reduce((m, c) => Math.max(m, c.num || 0), 0) + 1;
     store.transact(() => {
-      comments.push({ id: uid(), num, x: d.x, y: d.y, nodeId: d.nodeId, dx: d.dx, dy: d.dy, author: 'You', text: text.trim(), at: Date.now(), replies: [], resolved: false });
+      comments.push({ id: uid(), num, x: d.x, y: d.y, nodeId: d.nodeId, dx: d.dx, dy: d.dy, author: this.author, text: text.trim(), at: Date.now(), replies: [], resolved: false });
     });
     this.draft = null;
     this.openId = comments[comments.length - 1].id;
     this.render();
+  }
+
+  pinnedName(c) {
+    const n = c.nodeId && this.store.get(c.nodeId);
+    return n ? n.name : '';
   }
 
   render() {
@@ -88,7 +119,7 @@ export class CommentLayer {
       if (this.openId === c.id) {
         const all = [{ author: c.author, text: c.text, at: c.at }, ...c.replies];
         html += `<div data-ui class="dz-thread" style="left:${s.x + 36}px;top:${s.y - 30}px">
-          <div class="dz-thread-head"><span>Comment #${c.num}</span><span class="dz-thread-actions"><button data-act="resolve" title="${c.resolved ? 'Reopen' : 'Resolve'}">${c.resolved ? 'Reopen' : 'Resolve'}</button><button data-act="delete" title="Delete">Delete</button><button data-act="close" aria-label="Close">×</button></span></div>
+          <div class="dz-thread-head"><span>Comment #${c.num}${this.pinnedName(c) ? ` <span class="dz-on">on ${escapeHTML(this.pinnedName(c))}</span>` : ''}</span><span class="dz-thread-actions"><button data-act="resolve" title="${c.resolved ? 'Reopen' : 'Resolve'}">${c.resolved ? 'Reopen' : 'Resolve'}</button><button data-act="delete" title="Delete">Delete</button><button data-act="close" aria-label="Close">×</button></span></div>
           ${all.map((m) => `<div class="dz-msg"><div class="dz-msg-meta"><b>${escapeHTML(m.author)}</b> · ${timeAgo(m.at)}</div><div>${escapeHTML(m.text).replace(/\n/g, '<br>')}</div></div>`).join('')}
           <div class="dz-reply"><textarea rows="1" placeholder="Reply"></textarea><button data-act="reply" class="dz-post">Reply</button></div>
         </div>`;
@@ -135,7 +166,7 @@ export class CommentLayer {
       if (act === 'post') return this.post(ta.value);
       if (act === 'close') return this.close();
       if (!c) return;
-      if (act === 'reply' && ta.value.trim()) store.transact(() => c.replies.push({ author: 'You', text: ta.value.trim(), at: Date.now() }));
+      if (act === 'reply' && ta.value.trim()) store.transact(() => c.replies.push({ author: this.author, text: ta.value.trim(), at: Date.now() }));
       if (act === 'resolve') { store.transact(() => { c.resolved = !c.resolved; }); if (c.resolved) this.openId = null; }
       if (act === 'delete') { store.transact(() => { store.doc.comments = store.doc.comments.filter((x) => x !== c); }); this.openId = null; }
       this.render();

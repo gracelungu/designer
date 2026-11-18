@@ -282,6 +282,14 @@ export class ClaudeSession {
     this.status();
   }
 
+  /** Adds (or replaces) an MCP server for this session, now if Claude Code is running, else at start. */
+  async addServer(name: string, config: Record<string, unknown>) {
+    if (JSON.stringify(this.servers[name]) === JSON.stringify(config)) return;
+    this.servers[name] = config;
+    if (!this.cli) return;
+    await this.cli.request({ subtype: 'mcp_set_servers', servers: this.servers });
+  }
+
   async connectFigma(url: string) {
     this.servers.figma = { type: 'http', url };
     const r = (await this.need().request({ subtype: 'mcp_set_servers', servers: this.servers })) as { errors?: Record<string, string> };

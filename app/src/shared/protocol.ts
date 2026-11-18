@@ -161,6 +161,73 @@ export interface SetupState {
   error?: string;
 }
 
+/** A comment pinned to the canvas. Saved as .designer/comments/<id>.json so it travels with the repo. */
+export interface CanvasComment {
+  id: string;
+  num: number;
+  /** Where it was dropped, in canvas pixels (used if its layer is gone). */
+  x: number;
+  y: number;
+  /** The frame (or layer) it is pinned to; dx/dy are its offset inside that layer. */
+  nodeId: string | null;
+  dx: number;
+  dy: number;
+  author: string;
+  text: string;
+  at: number;
+  resolved: boolean;
+  replies: { author: string; text: string; at: number }[];
+}
+
+/** One frame of a shareable preview, drawn by the canvas. */
+export interface PreviewFrame {
+  id: string;
+  name: string;
+  w: number;
+  h: number;
+  svg: string;
+  css?: string;
+  /** Coded components inside it, or the components its layers link to. */
+  components?: { name: string; storyId?: string; file?: string }[];
+  /** Comment pins inside the frame, in frame pixels. */
+  pins?: { id: string; x: number; y: number }[];
+}
+
+/** Where a project's pull requests live. */
+export type ReviewHost = 'github' | 'azure';
+
+export interface ReviewStatus {
+  host: ReviewHost | null;
+  /** Ready to list pull requests; otherwise `problem` says what is missing. */
+  ready: boolean;
+  problem?: string;
+  /** For Azure DevOps: organization, project and repository read from the remote. */
+  org?: string;
+  project?: string;
+  repo?: string;
+}
+
+export interface PullRequestSummary {
+  id: number;
+  title: string;
+  author: string;
+  branch: string;
+  target: string;
+  status: string;
+  url: string;
+  draft?: boolean;
+  updatedAt?: string;
+}
+
+export interface ReviewThread {
+  id: string;
+  /** File and line the thread is on, if it is a code comment. */
+  file?: string;
+  line?: number;
+  resolved: boolean;
+  comments: { id: string; author: string; text: string; at?: string }[];
+}
+
 export interface FileChange {
   toolUseId: string;
   tool: string;
@@ -313,4 +380,5 @@ export type ServerMessage =
   | { type: 'canvas-op'; requestId: string; op: CanvasOp }
   | { type: 'sync'; job: SyncJob }
   | { type: 'code-changed'; change: CodeChange }
+  | { type: 'comments'; comments: CanvasComment[] }
   | { type: 'error'; text: string };

@@ -61,6 +61,23 @@ Layers linked to code stay in step with it in both directions. A linked layer is
 - **Canvas to code.** When you edit a linked layer (fill, stroke, corner radius, auto layout, padding, gap, text and its font), or change a live component's props, a bar on the canvas says the layer has edits that aren't in code yet. **Send to code** runs your local Claude Code headless in the project, with only read and edit tools (commands and edits outside the repo are refused). It edits the component, using your tokens where one matches. You review the diff and choose **Keep** or **Discard**. Discard puts each file back, unless it changed again since.
 - **Code to canvas.** Designer watches the project's git HEAD. After **Get latest**, a pull in a terminal, a commit or a branch switch, it reloads live components and renders each linked component out of sight. Then it updates the linked design layers with what changed in code. This is a three-way merge: a property only the code changed is applied, and a property you also changed on the canvas asks you to choose **Use code** or **Keep my design**.
 - Each linked layer keeps a small sync record (`sync` in `.designer/canvas.json`): its properties when design and code last matched, and how the code rendered then.
+## Working with the team
+
+- **Comments on the canvas.** Press C and click a frame to pin a comment; it follows the frame when it moves. Each thread is saved as its own file in `<project>/.designer/comments/<id>.json`, signed with your git `user.name`, so comments travel with Save version, merge cleanly when two people comment at once, and appear for everyone after Get latest. The **Comments** tab lists them; **Fix with Claude** hands one to Claude, which can read comments (`get_comments`) and reply or resolve them (`reply_to_comment`) through Designer's MCP server.
+- **A design preview for developers.** *Export design preview* (project menu) writes `.designer/preview/`: one SVG per top-level frame, a `README.md` that GitHub and Azure DevOps render with the frames, comments and linked components, and a self-contained `index.html` with comment pins and CSS (also downloaded). **Share for review** includes it by default: it commits the preview and comments, pushes the branch, and puts the preview link in the pull request.
+- **Pull requests and their comments.** The **Comments › Pull requests** view lists open pull requests for the project's remote and lets you read, reply to and (on Azure DevOps) resolve their comment threads.
+  - **Azure DevOps** remotes (`dev.azure.com`, `ssh.dev.azure.com`, `*.visualstudio.com`) go through Microsoft's Azure DevOps MCP server, started locally as `npx -y @azure-devops/mcp <organization>`. It signs in with your Microsoft account the first time; Designer holds no token. Claude Code gets the same server, so it can work with PRs from the chat. Set `DESIGNER_AZURE_MCP` to a JSON array (such as `["node","/path/server.js"]`) to run a different command; the organization is appended.
+  - **GitHub** remotes use the GitHub CLI with your own `gh auth login`.
+
+## Tests
+
+```bash
+npm test                         # unit and server tests (vitest)
+npm run build && npm run test:smoke:collab   # the collaboration features in a real browser (Playwright)
+node ../editor/tests/e2e.cjs     # the canvas editor
+```
+
+Claude Code and the Azure DevOps MCP server are replaced by stand-ins in `test/fixtures/`, so the tests need neither a sign-in nor network.
 
 ## Run it as a local server
 

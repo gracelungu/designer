@@ -10,7 +10,7 @@ import { ClaudeSession } from './session.js';
 import { listSessions } from './transcripts.js';
 import { findTokens, updateToken } from './tokens.js';
 import { importVariables, pullFromFigma, setLink, tokenReport, useFigmaValue } from './designTokens.js';
-import { DevProcess, diffFor, findRunningStorybook, getLatest, listDir, projectInfo, readMemory, saveVersion, shareForReview, writeMemory } from './project.js';
+import { DevProcess, diffFor, findRunningStorybook, getLatest, gitStatus, listDir, projectInfo, readMemory, saveVersion, shareForReview, writeMemory } from './project.js';
 import { PreviewProxies } from './proxy.js';
 import { AutoSetup } from './autosetup.js';
 import { planProject } from './setup.js';
@@ -20,7 +20,10 @@ import { demoAvailable, installDemo } from './demo.js';
 import { readSettings, writeSettings, type Settings } from './settings.js';
 import { CodeSync, HeadWatcher } from './sync.js';
 import type { LayerSync } from '../shared/protocol.js';
-import type { Capabilities, CanvasOp, CanvasState, ClaudeInstall, ClientMessage, ServerMessage } from '../shared/protocol.js';
+import { commentAuthor, describeComments, readComments, writeComments } from './comments.js';
+import { buildPreview, previewLink, writePreview } from './preview.js';
+import { AzureReviews, reviewProvider, type ReviewProvider } from './reviews.js';
+import type { Capabilities, CanvasComment, CanvasOp, CanvasState, ClaudeInstall, ClientMessage, PreviewFrame, ServerMessage } from '../shared/protocol.js';
 
 export interface ServerOptions {
   port?: number;
@@ -63,6 +66,7 @@ export async function startServer(opts: ServerOptions = {}) {
   const proxies = new PreviewProxies();
   const setup = new AutoSetup();
   let figma: FigmaClient | undefined;
+  let reviews: { cwd: string; remote?: string; provider: ReviewProvider | null } | undefined;
   const waiting = new Map<string, (r: unknown) => void>();
   let serverUrl = '';
   // Design -> code jobs, and the watcher that tells the canvas when code changed under it.
@@ -96,9 +100,36 @@ export async function startServer(opts: ServerOptions = {}) {
         allowedTools: ['mcp__designer'],
         servers: { designer: { type: 'http', url: `${serverUrl}/mcp`, headers: { 'x-designer-token': token } } },
       });
+      void addAzureServer();
       if (!projectPath) session.note(`No project is open yet. You are in Designer's own folder (${workspace}); new projects made from scratch can go here.`);
     }
     return session;
+  }
+
+  /** Where Designer keeps its files: <project>/.designer, or Designer's own folder before a project. */
+  const designerDir = () => (projectPath ? join(projectPath, '.designer') : workspace);
+
+  async function currentReviews(): Promise<ReviewProvider | null> {
+    const cwd = requireProject();
+    const remote = (await gitStatus(cwd)).remote;
+    if (!reviews || reviews.cwd !== cwd || reviews.remote !== remote) {
+      reviews?.provider?.close();
+      reviews = { cwd, remote, provider: reviewProvider(cwd, remote) };
+    }
+    return reviews.provider;
+  }
+
+  /** On an Azure DevOps project, Claude gets the Azure DevOps MCP server too, for PRs and their comments. */
+  async function addAzureServer() {
+    if (!projectPath || !session) return;
+    const p = await currentReviews().catch(() => null);
+    if (p instanceof AzureReviews) await session.addServer('azure-devops', p.mcpServerConfig()).catch(() => undefined);
+  }
+
+  async function saveComments(list: unknown[]) {
+    const comments = await writeComments(designerDir(), list);
+    broadcast({ type: 'comments', comments });
+    return comments;
   }
 
   async function openProject(path: string, byClaude = false, autoRun = opts.autoSetup !== false) {
@@ -118,6 +149,7 @@ export async function startServer(opts: ServerOptions = {}) {
     if (isNew) broadcast({ type: 'setup', setup: null });
     // Zero-config: work out how it runs, install, start it and get its components ready, in the background.
     if (autoRun && (isNew || setup.state?.status === 'failed')) void autoSetup(p);
+    void addAzureServer();
     return info;
   }
 
@@ -196,6 +228,20 @@ export async function startServer(opts: ServerOptions = {}) {
     canvasState: () => canvasState,
     addNodes: (nodes, nextToSelection) => askCanvas({ kind: 'add-nodes', nodes: nodes as never, nextToSelection, select: true }),
     updateNodes: (updates) => askCanvas({ kind: 'update-nodes', updates: updates as never }),
+    comments: async (includeResolved) => {
+      const list = await readComments(designerDir());
+      const layers = canvasState?.layers ?? [];
+      return describeComments(list, (id) => (id ? (layers.find((l) => l.id === id)?.name ?? (id ? 'a layer' : undefined)) : undefined), includeResolved);
+    },
+    replyToComment: async (id, text, resolve) => {
+      const list = await readComments(designerDir());
+      const c = list.find((x) => x.id === id || `#${x.num}` === id || String(x.num) === id);
+      if (!c) throw new Error(`No comment ${id}. Use get_comments for the ids.`);
+      if (text.trim()) c.replies.push({ author: 'Claude', text: text.trim(), at: Date.now() });
+      if (resolve !== undefined) c.resolved = resolve;
+      await saveComments(list);
+      return `${text.trim() ? 'Replied to' : 'Updated'} comment #${c.num}${resolve ? ' and resolved it' : resolve === false ? ' and reopened it' : ''}.`;
+    },
     showComponent: async (storyId, args, nextToSelection) => {
       if (!storyId) throw new Error('Give a story id.');
       const sb = await storybookUrl();
@@ -346,7 +392,7 @@ export async function startServer(opts: ServerOptions = {}) {
     'POST /api/sync/keep': async (body) => codeSync.keep(String(body.id)),
     'POST /api/sync/discard': async (body) => codeSync.discard(String(body.id)),
     'POST /api/git/save': async (body) => saveVersion(requireProject(), String(body.message ?? '')),
-    'POST /api/git/share': async (body) => shareForReview(requireProject(), String(body.title ?? '')),
+    'POST /api/git/share': async (body) => shareForReview(requireProject(), String(body.title ?? ''), { preview: !!body.preview }),
     'POST /api/run/app': async (body) => ({ url: await runDev('app', body.command ? String(body.command) : undefined) }),
     'POST /api/run/storybook': async (body) => ({ url: await runDev('storybook', body.command ? String(body.command) : undefined) }),
     'GET /api/run': async () => ({ app: app.url ?? null, storybook: storybook.url ?? null }),
@@ -357,13 +403,61 @@ export async function startServer(opts: ServerOptions = {}) {
     },
     'GET /api/canvas': async () => {
       const f = await canvasFile();
-      return { path: f, data: await readFile(f, 'utf8').then((t) => JSON.parse(t) as unknown, () => null) };
+      const data = await readFile(f, 'utf8').then((t) => JSON.parse(t) as { doc?: { comments?: unknown[] } } | null, () => null);
+      let comments = await readComments(designerDir());
+      // Canvases saved before comments had their own files kept them inside canvas.json: move them out.
+      const old = data?.doc?.comments;
+      if (!comments.length && Array.isArray(old) && old.length) comments = await writeComments(designerDir(), old);
+      if (data?.doc) data.doc.comments = comments;
+      return { path: f, data, comments, author: await commentAuthor(projectPath) };
     },
     'POST /api/canvas': async (body) => {
       const f = await canvasFile();
       await mkdir(dirname(f), { recursive: true });
-      await writeFile(f, JSON.stringify(body.data ?? null, null, 1));
+      // Comments are saved one file per thread (see /api/comments), so they merge cleanly in git.
+      const data = body.data as { doc?: Record<string, unknown> } | null;
+      const doc = data?.doc ? { ...data.doc, comments: [] } : undefined;
+      await writeFile(f, JSON.stringify(data ? { ...data, ...(doc ? { doc } : {}) } : null, null, 1));
       return { ok: true, path: f };
+    },
+    'GET /api/comments': async () => ({ comments: await readComments(designerDir()), author: await commentAuthor(projectPath) }),
+    'POST /api/comments': async (body) => ({ comments: await saveComments(Array.isArray(body.comments) ? body.comments : []) }),
+    'POST /api/preview': async (body) => {
+      const frames = (Array.isArray(body.frames) ? body.frames : []) as PreviewFrame[];
+      const comments: CanvasComment[] = await readComments(designerDir());
+      const st = projectPath ? await gitStatus(projectPath) : undefined;
+      const link = previewLink(st?.remote, st?.branch);
+      const title = String(body.title || (projectPath ? `${projectPath.split(/[\\/]/).pop()} design preview` : 'Design preview'));
+      const { files } = buildPreview({ title, frames, comments, link });
+      const out = await writePreview(designerDir(), files);
+      return { ok: true, dir: out.dir, files: out.files, link: link ?? null, html: files['index.html'], inProject: !!projectPath };
+    },
+    'GET /api/reviews/status': async () => {
+      const p = await currentReviews();
+      return p ? p.status() : { host: null, ready: false, problem: 'Pull requests show here for projects on GitHub or Azure DevOps.' };
+    },
+    'GET /api/reviews': async () => {
+      const p = await currentReviews();
+      return p ? p.list() : [];
+    },
+    'GET /api/reviews/threads': async (_b, url) => {
+      const p = await currentReviews();
+      if (!p) throw new HttpError(400, 'This project has no GitHub or Azure DevOps remote.');
+      return p.threads(Number(url.searchParams.get('pr')));
+    },
+    'POST /api/reviews/reply': async (body) => {
+      const p = await currentReviews();
+      if (!p) throw new HttpError(400, 'This project has no GitHub or Azure DevOps remote.');
+      const text = String(body.text ?? '').trim();
+      if (!text) throw new HttpError(400, 'Write a reply first.');
+      await p.reply(Number(body.pr), body.threadId ? String(body.threadId) : undefined, text);
+      return p.threads(Number(body.pr));
+    },
+    'POST /api/reviews/resolve': async (body) => {
+      const p = await currentReviews();
+      if (!p?.resolve) throw new HttpError(400, 'Resolving threads from Designer works for Azure DevOps projects.');
+      await p.resolve(Number(body.pr), String(body.threadId), !!body.resolved);
+      return p.threads(Number(body.pr));
     },
     'GET /api/figma/status': async (_b, url) => {
       const custom = url.searchParams.get('url');
@@ -536,6 +630,7 @@ export async function startServer(opts: ServerOptions = {}) {
     setup.cancel();
     session?.stop();
     headWatcher.stop();
+    reviews?.provider?.close();
     app.stop();
     storybook.stop();
     proxies.closeAll();
