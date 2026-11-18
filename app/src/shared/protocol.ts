@@ -236,6 +236,77 @@ export interface FileChange {
   after: string;
 }
 
+/** One view (a story or a page) photographed before and after a change. Image fields are file names in the review's folder. */
+export interface VisualShot {
+  key: string;
+  label: string;
+  kind: 'story' | 'page';
+  storyId?: string;
+  url?: string;
+  before?: string;
+  after?: string;
+  /** Before and after with every changed pixel in red. Only there when something changed. */
+  diff?: string;
+  /** Share of pixels that changed, 0..1. */
+  changed?: number;
+  sizeChanged?: boolean;
+  error?: string;
+}
+
+/** A visual review of one change: what Claude (or a token edit) did, and how it looks before and after. */
+export interface VisualReview {
+  id: string;
+  title: string;
+  createdAt: number;
+  files: string[];
+  shots: VisualShot[];
+  note?: string;
+  /** Still taking the after pictures. */
+  capturing?: boolean;
+  /** The pull request it was sent in. */
+  sentIn?: string;
+}
+
+export type ShareStep = 'branch' | 'save' | 'screenshots' | 'push' | 'pr';
+
+/** A saved version, in designer words: a git commit. */
+export interface VersionEntry {
+  id: string;
+  short: string;
+  title: string;
+  description?: string;
+  author: string;
+  date: number;
+  /** A named version (a tag Designer made), shown as a milestone. */
+  name?: string;
+  /** Files changed in it. */
+  files: number;
+  /** Not on the team's copy yet. */
+  local: boolean;
+}
+
+/** A variation, in designer words: a git branch. */
+export interface Variation {
+  name: string;
+  current: boolean;
+  /** Last change on it. */
+  updated: number;
+  title: string;
+  /** On the team's copy too. */
+  shared: boolean;
+}
+
+export interface VersionHistory {
+  branch?: string;
+  main: string;
+  versions: VersionEntry[];
+  variations: Variation[];
+  unsaved: number;
+  ahead: number;
+  behind: number;
+  remote?: string;
+}
+
 /** An image or text file attached to a chat message. */
 export interface Attachment {
   name: string;
@@ -381,4 +452,6 @@ export type ServerMessage =
   | { type: 'sync'; job: SyncJob }
   | { type: 'code-changed'; change: CodeChange }
   | { type: 'comments'; comments: CanvasComment[] }
+  | { type: 'review'; review: VisualReview }
+  | { type: 'share-step'; step: ShareStep; state: 'running' | 'done' | 'skipped' | 'error'; detail?: string }
   | { type: 'error'; text: string };

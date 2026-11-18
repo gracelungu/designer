@@ -78,6 +78,13 @@ node ../editor/tests/e2e.cjs     # the canvas editor
 ```
 
 Claude Code and the Azure DevOps MCP server are replaced by stand-ins in `test/fixtures/`, so the tests need neither a sign-in nor network.
+## Visual review, sharing and versions
+
+- **Before and after for every change.** When Claude is about to edit a file, Designer photographs the components on the canvas and the stories that show that file, in a headless Chrome, Edge, Brave or Chromium it finds on your computer (or `DESIGNER_BROWSER`). When Claude's turn ends it photographs them again and compares them pixel by pixel. Code › Changes lists each change with Side by side, Slider and Highlight views. Token edits get the same treatment. Pictures live in `.designer/reviews/`, kept out of git through `.git/info/exclude`.
+- **Share for review, in one click.** Saves your changes on a branch of their own, uploads the pictures to a `designer-screenshots` branch (so they never enter the change itself), pushes, and opens a pull request whose description shows before and after. It uses `gh` when it is signed in; otherwise it opens GitHub's (or GitLab's, or Azure DevOps') new pull request page with everything filled in.
+- **Versions tab, like Figma's version history.** Named versions (git tags under `version/`), every saved version with Restore (a new version with the old content, so nothing is lost), variations (branches) you can open, merge in or remove, and Sync with the team. Switching or restoring saves unsaved work first.
+
+Tests: `npm test` runs everything, including `test/smoke-visual.test.ts`, which drives the built app (`npm run build` first) in a real browser with a stand-in Claude Code, Storybook and GitHub remote. Set `SMOKE_SHOTS=<folder>` to keep its screenshots.
 
 ## Run it as a local server
 

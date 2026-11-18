@@ -46,8 +46,9 @@ createInterface({ input: process.stdin }).on('line', async (line) => {
     // Without it the fake edits hello.txt, replacing "hello" with the prompt.
     const steps = process.env.FAKE_CLAUDE_EDITS
       ? JSON.parse(process.env.FAKE_CLAUDE_EDITS)
-      : [{ file: 'hello.txt', old: 'hello', new: text }];
-    if (!process.env.FAKE_CLAUDE_EDITS && !existsSync(join(process.cwd(), 'hello.txt'))) writeFileSync(join(process.cwd(), 'hello.txt'), 'hello world\n');
+      : [{ file: process.env.FAKE_CLAUDE_FILE || 'hello.txt', old: process.env.FAKE_CLAUDE_FROM || 'hello', new: process.env.FAKE_CLAUDE_FILE ? text.trim().split('\n').pop() : text }];
+    // FAKE_CLAUDE_FILE / FAKE_CLAUDE_FROM: edit another file, swapping FROM for the last line of the prompt.
+    if (!process.env.FAKE_CLAUDE_EDITS && !process.env.FAKE_CLAUDE_FILE && !existsSync(join(process.cwd(), 'hello.txt'))) writeFileSync(join(process.cwd(), 'hello.txt'), 'hello world\n');
     let i = 0;
     for (const step of steps) {
       const id = `tool${++i}`;

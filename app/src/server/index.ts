@@ -24,6 +24,9 @@ import { commentAuthor, describeComments, readComments, writeComments } from './
 import { buildPreview, previewLink, writePreview } from './preview.js';
 import { AzureReviews, reviewProvider, type ReviewProvider } from './reviews.js';
 import type { Capabilities, CanvasComment, CanvasOp, CanvasState, ClaudeInstall, ClientMessage, PreviewFrame, ServerMessage } from '../shared/protocol.js';
+import { Camera, ReviewManager, reviewsDir, summarize, type Shooter } from './visual.js';
+import { sendForReview } from './share.js';
+import { createVariation, deleteVariation, history, mergeVariation, nameVersion, restoreVersion, switchVariation, syncWithTeam, versionFiles } from './versions.js';
 
 export interface ServerOptions {
   port?: number;
@@ -42,6 +45,12 @@ export interface ServerOptions {
   install?: (command: string, cwd: string) => Promise<void>;
   /** The bundled demo project to copy from, if this build ships one. */
   demoDir?: string;
+  /** Takes the before/after screenshots (default: a headless Chrome-family browser found on the computer). */
+  shooter?: Shooter;
+  /** The gh CLI used to open pull requests (default: gh on PATH). */
+  gh?: string;
+  /** Wait after a change before the after screenshots, for dev servers to rebuild (ms). */
+  settleMs?: number;
 }
 
 /** Only answer requests addressed to loopback, which blocks DNS-rebinding pages. */
@@ -78,6 +87,25 @@ export async function startServer(opts: ServerOptions = {}) {
   });
   const headWatcher = new HeadWatcher((change) => broadcast({ type: 'code-changed', change }));
   if (opts.initialProject) void headWatcher.watch(opts.initialProject);
+  const shooter = opts.shooter ?? new Camera();
+  const visualReviews = new ReviewManager({
+    project: () => projectPath,
+    shooter,
+    // Only a Storybook that is already up: a screenshot never starts one (that can take minutes).
+    urls: async () => {
+      if (!projectPath || storybook.url) return { storybook: storybook.url ?? null, app: app.url ?? null };
+      const info = await projectInfo(projectPath);
+      return { storybook: (await findRunningStorybook(info.stories.map((s) => s.file), info.scripts.storybook)) ?? null, app: app.url ?? null };
+    },
+    stories: async (p) => (await projectInfo(p)).stories,
+    canvas: async (p) => JSON.parse(await readFile(join(p, '.designer', 'canvas.json'), 'utf8')) as unknown,
+    broadcast: (m) => broadcast(m),
+    settleMs: opts.settleMs,
+  });
+  /** Tells the chat a review is ready, so the designer knows where to look. */
+  const announce = (r: Awaited<ReturnType<ReviewManager['end']>>) => {
+    if (r && r.shots.length) broadcast({ type: 'item', item: { kind: 'system', id: `review-${r.id}`, text: `Visual review ready: ${summarize(r)}. See Code › Changes.` } });
+  };
 
   const broadcast = (m: ServerMessage) => {
     const data = JSON.stringify(m);
@@ -99,6 +127,9 @@ export async function startServer(opts: ServerOptions = {}) {
         systemPrompt: SYSTEM_PROMPT,
         allowedTools: ['mcp__designer'],
         servers: { designer: { type: 'http', url: `${serverUrl}/mcp`, headers: { 'x-designer-token': token } } },
+        onTurnStart: (text) => visualReviews.begin(text),
+        onEditStart: (abs) => visualReviews.beforeEdit(abs),
+        onTurnEnd: () => void visualReviews.end().then(announce, () => undefined),
       });
       void addAzureServer();
       if (!projectPath) session.note(`No project is open yet. You are in Designer's own folder (${workspace}); new projects made from scratch can go here.`);
@@ -327,7 +358,7 @@ export async function startServer(opts: ServerOptions = {}) {
     },
     'GET /api/tokens': async () => findTokens(requireProject()),
     'POST /api/tokens': async (body) => {
-      const r = await updateToken(requireProject(), String(body.file), Number(body.line), String(body.name), String(body.value));
+      const r = await visualReviews.around(`Change ${String(body.name)} to ${String(body.value)}`, [String(body.file)], () => updateToken(requireProject(), String(body.file), Number(body.line), String(body.name), String(body.value)));
       broadcast({ type: 'file-change', change: { toolUseId: `token-${Date.now()}`, tool: 'Token', path: r.path, before: r.before, after: r.after } });
       return findTokens(requireProject());
     },
@@ -393,6 +424,40 @@ export async function startServer(opts: ServerOptions = {}) {
     'POST /api/sync/discard': async (body) => codeSync.discard(String(body.id)),
     'POST /api/git/save': async (body) => saveVersion(requireProject(), String(body.message ?? '')),
     'POST /api/git/share': async (body) => shareForReview(requireProject(), String(body.title ?? ''), { preview: !!body.preview }),
+    'GET /api/visual-reviews': async () => visualReviews.list(),
+    'POST /api/visual-reviews/retake': async (body) => visualReviews.retake(String(body.id)),
+    'POST /api/visual-reviews/remove': async (body) => {
+      await visualReviews.remove(String(body.id));
+      return { ok: true };
+    },
+    'GET /api/visual-reviews/camera': async () => ({ available: shooter.available, reason: shooter.reason ?? null }),
+    'POST /api/git/send': async (body) => {
+      const cwd = requireProject();
+      const all = await visualReviews.list();
+      const ids = Array.isArray(body.reviewIds) ? (body.reviewIds as string[]) : all.filter((r) => !r.sentIn).map((r) => r.id);
+      const chosen = all.filter((r) => ids.includes(r.id));
+      const r = await sendForReview(cwd, {
+        title: String(body.title ?? ''),
+        description: body.description ? String(body.description) : undefined,
+        reviews: chosen,
+        reviewDir: (id) => join(reviewsDir(cwd), id),
+        onStep: (step, state, detail) => broadcast({ type: 'share-step', step, state, detail }),
+        gh: opts.gh,
+        preview: !!body.preview,
+      });
+      if (r.ok && r.url) for (const v of chosen) await visualReviews.update(v.id, { sentIn: r.url }).catch(() => undefined);
+      broadcast({ type: 'project', project: await projectInfo(cwd) });
+      return r;
+    },
+    'GET /api/versions': async () => history(requireProject()),
+    'GET /api/versions/files': async (_b, url) => versionFiles(requireProject(), String(url.searchParams.get('id') ?? '')),
+    'POST /api/versions/name': async (body) => afterGit(await nameVersion(requireProject(), String(body.name ?? ''), String(body.description ?? ''))),
+    'POST /api/versions/restore': async (body) => afterGit(await restoreVersion(requireProject(), String(body.id ?? '')), true),
+    'POST /api/variations/create': async (body) => afterGit(await createVariation(requireProject(), String(body.name ?? ''))),
+    'POST /api/variations/switch': async (body) => afterGit(await switchVariation(requireProject(), String(body.name ?? '')), true),
+    'POST /api/variations/merge': async (body) => afterGit(await mergeVariation(requireProject(), String(body.name ?? '')), true),
+    'POST /api/variations/delete': async (body) => afterGit(await deleteVariation(requireProject(), String(body.name ?? ''))),
+    'POST /api/git/sync': async () => afterGit(await syncWithTeam(requireProject()), true),
     'POST /api/run/app': async (body) => ({ url: await runDev('app', body.command ? String(body.command) : undefined) }),
     'POST /api/run/storybook': async (body) => ({ url: await runDev('storybook', body.command ? String(body.command) : undefined) }),
     'GET /api/run': async () => ({ app: app.url ?? null, storybook: storybook.url ?? null }),
@@ -477,7 +542,25 @@ export async function startServer(opts: ServerOptions = {}) {
     },
   };
 
+  /** After a version or variation change, the UI refreshes the project (and the canvas, which may differ). */
+  async function afterGit<T extends { ok: boolean }>(r: T, contentChanged = false) {
+    if (projectPath && (r.ok || contentChanged)) broadcast({ type: 'project', project: await projectInfo(projectPath) });
+    return r;
+  }
+
   async function handleApi(req: IncomingMessage, res: ServerResponse, url: URL) {
+    // Images go in <img src>, which can't send headers, so they take the token in the query.
+    if (req.method === 'GET' && url.pathname === '/api/review-image') {
+      if (url.searchParams.get('token') !== token) return json(res, 403, { error: 'Missing or wrong token' });
+      try {
+        const file = visualReviews.imagePath(String(url.searchParams.get('id')), String(url.searchParams.get('file')));
+        if (!(await stat(file).then((s) => s.isFile(), () => false))) return json(res, 404, { error: 'Not found' });
+        res.writeHead(200, { 'content-type': 'image/png', 'cache-control': 'no-store' });
+        return createReadStream(file).pipe(res);
+      } catch (e) {
+        return json(res, 400, { error: (e as Error).message });
+      }
+    }
     if (req.headers['x-designer-token'] !== token) return json(res, 403, { error: 'Missing or wrong token' });
     const route = routes[`${req.method} ${url.pathname}`];
     if (!route) return json(res, 404, { error: 'Not found' });
@@ -634,6 +717,7 @@ export async function startServer(opts: ServerOptions = {}) {
     app.stop();
     storybook.stop();
     proxies.closeAll();
+    void shooter.close();
     wss.close();
     server.close();
   };
