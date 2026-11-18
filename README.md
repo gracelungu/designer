@@ -6,7 +6,7 @@ Designer is a desktop app for product designers. You open your team's repository
 
 > **Status: early.** The [app](app/) runs as a local server or a Mac app, and drives the `claude` CLI installed on your computer. The clickable prototype below shows the full design, with its AI simulated.
 >
-> [Try the clickable prototype](https://claude.ai/artifact/MWMd2fJTtkMxULsEz61p6j) · [Read the product plan and architecture](docs/plan.md)
+> [Try the clickable prototype](https://claude.ai/artifact/MWMd2fJTtkMxULsEz61p6j) · [Canvas editor with working Figma-style tools](editor/README.md) · [Read the product plan and architecture](docs/plan.md)
 
 ---
 
