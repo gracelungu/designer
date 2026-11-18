@@ -42,6 +42,14 @@ The chat works through the CLI's own controls:
 - **Figma | Code properties.** The right panel switches between design properties (plus the rendered styles of a code layer, in Figma terms) and code properties (component props, size, a JSX snippet, or the CSS and code link of a design layer).
 - The canvas is saved to `<project>/.designer/canvas.json`, or `~/Designer/canvas.json` with no project.
 
+## Design and code, both ways
+
+Layers linked to code stay in step with it in both directions. A linked layer is a design layer with a code link (set by Figma import, by Claude, or with **Link to a component** in the Code panel), or a live component on the canvas.
+
+- **Canvas to code.** When you edit a linked layer (fill, stroke, corner radius, auto layout, padding, gap, text and its font), or change a live component's props, a bar on the canvas says the layer has edits that aren't in code yet. **Send to code** runs your local Claude Code headless in the project, with only read and edit tools (commands and edits outside the repo are refused). It edits the component, using your tokens where one matches. You review the diff and choose **Keep** or **Discard**. Discard puts each file back, unless it changed again since.
+- **Code to canvas.** Designer watches the project's git HEAD. After **Get latest**, a pull in a terminal, a commit or a branch switch, it reloads live components and renders each linked component out of sight. Then it updates the linked design layers with what changed in code. This is a three-way merge: a property only the code changed is applied, and a property you also changed on the canvas asks you to choose **Use code** or **Keep my design**.
+- Each linked layer keeps a small sync record (`sync` in `.designer/canvas.json`): its properties when design and code last matched, and how the code rendered then.
+
 ## Run it as a local server
 
 You need Node 20 or newer, and Claude Code installed and signed in.
@@ -53,6 +61,8 @@ npm run build
 npm start                 # opens http://127.0.0.1:4818
 npm start -- --project ~/code/my-repo --port 4818 --no-open
 ```
+
+Tests: `npm test` runs the unit and integration tests (a fake `claude` in `test/fixtures` speaks the real stream-json protocol, so no sign-in or credits are needed). `npm run build && npm run test:smoke` drives the built app in Chromium through both sync directions, with a real git project and a stand-in Storybook.
 
 For development, run `npm run dev`. Vite then serves the UI on port 5173 and the server runs on port 4818.
 

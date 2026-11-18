@@ -16,6 +16,10 @@ export interface CanvasHost {
   placeStory(storyId: string, opts?: { nextToSelection?: boolean; title?: string; file?: string; args?: Record<string, unknown> }): Promise<string>;
   showPage(url: string, name?: string): Promise<string>;
   state(): ReturnType<typeof canvasState>;
+  /** Renders a story out of sight and resolves with the styles its probe reports. */
+  measureStory(storyId: string, timeoutMs?: number): Promise<Record<string, string>>;
+  /** Reloads every live component and page frame, so they show code that just changed. */
+  reloadLive(): void;
   context(): ReturnType<typeof selectionContext>;
 }
 
@@ -167,6 +171,45 @@ export function canvasHost(onAskAI: () => void): CanvasHost {
       return id;
     },
     state: () => canvasState(store),
+    async measureStory(storyId, timeoutMs = 20000) {
+      const { src } = await api<{ src: string }>(`/api/story-src?id=${encodeURIComponent(storyId)}`);
+      return new Promise<Record<string, string>>((resolve, reject) => {
+        const f = document.createElement('iframe');
+        f.setAttribute('aria-hidden', 'true');
+        f.tabIndex = -1;
+        f.style.cssText = 'position:fixed;left:-10000px;top:0;width:1024px;height:768px;visibility:hidden;pointer-events:none;border:0';
+        let settle: ReturnType<typeof setTimeout> | undefined;
+        let last: Record<string, string> | undefined;
+        const end = (err?: Error) => {
+          clearTimeout(settle);
+          clearTimeout(timer);
+          window.removeEventListener('message', onMsg);
+          f.remove();
+          if (last && !err) resolve(last);
+          else reject(err ?? new Error('The component did not render.'));
+        };
+        const onMsg = (e: MessageEvent) => {
+          const d = e.data as { source?: string; type?: string; styles?: Record<string, string>; message?: string };
+          if (e.source !== f.contentWindow || d?.source !== 'designer-probe') return;
+          if (d.type === 'styles' && d.styles) {
+            last = d.styles;
+            // Wait for it to stop changing (fonts, late renders).
+            clearTimeout(settle);
+            settle = setTimeout(() => end(), 500);
+          } else if (d.type === 'error') end(new Error(d.message ?? 'The component failed to render.'));
+        };
+        const timer = setTimeout(() => end(last ? undefined : new Error('The component took too long to render.')), timeoutMs);
+        window.addEventListener('message', onMsg);
+        f.src = src;
+        document.body.append(f);
+      });
+    },
+    reloadLive() {
+      for (const [id, fr] of editor.code.frames) {
+        const n = store.get(id);
+        if (n?.type === 'code' && n.code?.src) fr.iframe.src = n.code.src;
+      }
+    },
     context: () => selectionContext(store),
   };
   return host;

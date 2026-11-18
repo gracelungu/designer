@@ -13,6 +13,8 @@ import { DevProcess, diffFor, findRunningStorybook, getLatest, listDir, projectI
 import { PreviewProxies } from './proxy.js';
 import { handleMcp, SYSTEM_PROMPT, type ToolHost } from './mcp.js';
 import { FigmaClient, figmaStatus, parseOutline } from './figma.js';
+import { CodeSync, HeadWatcher } from './sync.js';
+import type { LayerSync } from '../shared/protocol.js';
 import type { Capabilities, CanvasOp, CanvasState, ClaudeInstall, ClientMessage, ServerMessage } from '../shared/protocol.js';
 
 export interface ServerOptions {
@@ -49,6 +51,15 @@ export async function startServer(opts: ServerOptions = {}) {
   let figma: FigmaClient | undefined;
   const waiting = new Map<string, (r: unknown) => void>();
   let serverUrl = '';
+  // Design -> code jobs, and the watcher that tells the canvas when code changed under it.
+  const codeSync = new CodeSync({
+    claudePath: () => (claude.found ? claude.path : undefined),
+    cwd: () => requireProject(),
+    send: (job) => broadcast({ type: 'sync', job }),
+    model: () => session?.model,
+  });
+  const headWatcher = new HeadWatcher((change) => broadcast({ type: 'code-changed', change }));
+  if (opts.initialProject) void headWatcher.watch(opts.initialProject);
 
   const broadcast = (m: ServerMessage) => {
     const data = JSON.stringify(m);
@@ -83,6 +94,7 @@ export async function startServer(opts: ServerOptions = {}) {
       app.stop();
       storybook.stop();
       projectPath = p;
+      void headWatcher.watch(p);
       if (session && session.cwd !== p && !byClaude) session.note(`The user opened the project at ${p}. Work in that folder from now on (use absolute paths, and cd there before running commands).`);
     }
     const info = await projectInfo(p);
@@ -191,6 +203,7 @@ export async function startServer(opts: ServerOptions = {}) {
       app.stop();
       storybook.stop();
       projectPath = undefined;
+      headWatcher.stop();
       broadcast({ type: 'project', project: null });
       return { ok: true };
     },
@@ -212,7 +225,19 @@ export async function startServer(opts: ServerOptions = {}) {
       return findTokens(requireProject());
     },
     'GET /api/diff': async (_b, url) => diffFor(requireProject(), String(url.searchParams.get('path'))),
-    'POST /api/git/latest': async () => getLatest(requireProject()),
+    'POST /api/git/latest': async () => {
+      const r = await getLatest(requireProject());
+      // Tell the canvas what the pull changed, so linked layers can follow the code.
+      const change = r.ok ? await headWatcher.check('pull') : null;
+      return { ...r, files: change?.files ?? [] };
+    },
+    'GET /api/sync': async () => codeSync.list(),
+    'POST /api/sync/to-code': async (body) => {
+      requireProject();
+      return codeSync.start((body.layers ?? []) as LayerSync[]);
+    },
+    'POST /api/sync/keep': async (body) => codeSync.keep(String(body.id)),
+    'POST /api/sync/discard': async (body) => codeSync.discard(String(body.id)),
     'POST /api/git/save': async (body) => saveVersion(requireProject(), String(body.message ?? '')),
     'POST /api/git/share': async (body) => shareForReview(requireProject(), String(body.title ?? '')),
     'POST /api/run/app': async (body) => ({ url: await runDev('app', body.command ? String(body.command) : undefined) }),
@@ -400,6 +425,7 @@ export async function startServer(opts: ServerOptions = {}) {
   serverUrl = `http://${host}:${port}`;
   const close = () => {
     session?.stop();
+    headWatcher.stop();
     app.stop();
     storybook.stop();
     proxies.closeAll();

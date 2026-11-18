@@ -11,6 +11,8 @@ import { DesignPanel } from './components/DesignPanel';
 import { CodePanel, RenderedStyles, useCanvasTick } from './components/CodePanel';
 import { ComponentsPanel } from './components/ComponentsPanel';
 import { canvasHost, reconnectLive, type CanvasHost } from './canvas/host';
+import { SyncBar, SyncPanel } from './components/SyncPanel';
+import { SyncController } from './sync/controller';
 
 interface Status {
   claude: ClaudeInstall;
@@ -93,6 +95,12 @@ function Workspace({ status }: { status: Status }) {
   const host = hostRef.current;
   const editor = host.editor;
   useSelectionTick(editor);
+  const syncRef = useRef<SyncController>(undefined);
+  if (!syncRef.current) syncRef.current = new SyncController({ store: editor.store, measure: (id) => host.measureStory(id), reloadLive: () => host.reloadLive(), api });
+  const sync = syncRef.current;
+  const [syncOpen, setSyncOpen] = useState(false);
+  // For automated checks (the smoke test drives the canvas through this).
+  (window as unknown as { __designer?: unknown }).__designer = { host, sync };
 
   const loadCaps = useCallback((refresh = false) => {
     setCapsError('');
@@ -118,6 +126,19 @@ function Workspace({ status }: { status: Status }) {
         if (m.kind === 'app') void host.showPage(m.url);
         return;
       }
+      if (m.type === 'sync') {
+        sync.onJob(m.job);
+        if (m.job.status === 'review') {
+          setSide('code');
+          setSyncOpen(true);
+        }
+        return;
+      }
+      if (m.type === 'code-changed') {
+        void refreshProject();
+        void sync.onCodeChanged(m.change);
+        return;
+      }
       if (m.type === 'canvas-op') {
         void host.apply(m.op).then(
           (result) => socket.send({ type: 'canvas-result', requestId: m.requestId, result }),
@@ -138,6 +159,7 @@ function Workspace({ status }: { status: Status }) {
         }
       }
       await host.load();
+      void sync.loadJobs();
       const r = await api<{ app: string | null; storybook: string | null }>('/api/run').catch(() => ({ app: null, storybook: null }));
       setRunning(r);
       socket.send({ type: 'start', model: prefs.model, effort: prefs.effort, mode: prefs.mode });
@@ -346,6 +368,7 @@ function Workspace({ status }: { status: Status }) {
 
         <main className="stage">
           <Adopt el={host.stage} className="stage-host" />
+          <SyncBar sync={sync} onOpen={() => (setSide('code'), setSyncOpen(true))} />
           <CanvasHint editor={editor} onFigma={() => setModal('figma')} onComponents={() => setLeft('components')} />
         </main>
 
@@ -370,7 +393,9 @@ function Workspace({ status }: { status: Status }) {
             </div>
           </div>
           <div className={`pane ${side === 'code' ? '' : 'hidden'}`} data-canvas-keys="off">
-            {hasSelection ? (
+            {syncOpen ? (
+              <SyncPanel sync={sync} onClose={() => setSyncOpen(false)} onSelect={(id) => (editor.store.select([id]), editor.zoomToSelection())} />
+            ) : hasSelection ? (
               <CodePanel editor={editor} stories={project?.stories ?? []} onAsk={(p) => (p.endsWith(': ') ? (setLeft('chat'), setChatView('chat'), window.dispatchEvent(new CustomEvent('designer:focus-chat'))) : ask(p))} onShowStory={(id, next) => void placeStory(id, next)} />
             ) : project ? (
               <>
@@ -379,6 +404,7 @@ function Workspace({ status }: { status: Status }) {
                     Changes {changedFiles > 0 && <span className="badge dark">{changedFiles}</span>}
                   </button>
                   <button className={codeTab === 'tokens' ? 'on' : ''} onClick={() => setCodeTab('tokens')}>Tokens</button>
+                  <button onClick={() => setSyncOpen(true)}>Sync</button>
                 </div>
                 {codeTab === 'tokens' ? <DesignPanel onAsk={(p) => ask(p, false)} onChanged={() => void refreshProject()} /> : <Changes changes={chat.changes} git={project.git} />}
               </>

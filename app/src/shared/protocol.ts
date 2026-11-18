@@ -156,6 +156,60 @@ export interface CanvasState {
   layers: { id: string; name: string; type: string; x: number; y: number; w: number; h: number; children?: number }[];
 }
 
+// ----- Two-way sync between canvas layers and code -----
+
+/** One property of a layer that changed, in design terms (Fill, Corner radius, ...). */
+export interface DesignChange {
+  /** Key in a sync snapshot, e.g. fill, radius, padding, fontSize, content, or arg:<name> for a prop. */
+  prop: string;
+  label: string;
+  from: unknown;
+  to: unknown;
+  /** The same change as CSS, when there is one (e.g. "background-color: #2563EB"). */
+  css?: string;
+}
+
+/** A canvas layer linked to code, with what changed on the canvas since design and code last matched. */
+export interface LayerSync {
+  layerId: string;
+  name: string;
+  /** design: a design layer linked to a component; component: a live render whose props changed. */
+  kind: 'design' | 'component';
+  storyId?: string;
+  file?: string;
+  exportName?: string;
+  changes: DesignChange[];
+}
+
+export interface SyncFile {
+  path: string;
+  /** null when Claude created the file. */
+  before: string | null;
+  after: string;
+}
+
+/** A design-to-code request run by the local Claude Code, and the code change it proposes. */
+export interface SyncJob {
+  id: string;
+  layers: LayerSync[];
+  status: 'running' | 'review' | 'kept' | 'discarded' | 'failed';
+  progress: string[];
+  files: SyncFile[];
+  summary: string;
+  error?: string;
+  /** Files Discard left alone because they changed again after Claude's edit. */
+  skipped?: string[];
+  createdAt: number;
+}
+
+/** Code that changed under the canvas: a pull, a commit or a branch switch moved HEAD. */
+export interface CodeChange {
+  from: string;
+  to: string;
+  files: string[];
+  reason: 'pull' | 'head';
+}
+
 // ----- WebSocket: client -> server -----
 export type ClientMessage =
   | { type: 'start'; resume?: string; model?: string; effort?: string; mode?: PermissionMode }
@@ -191,4 +245,6 @@ export type ServerMessage =
   | { type: 'project'; project: ProjectInfo | null }
   | { type: 'run'; kind: 'app' | 'storybook'; url: string }
   | { type: 'canvas-op'; requestId: string; op: CanvasOp }
+  | { type: 'sync'; job: SyncJob }
+  | { type: 'code-changed'; change: CodeChange }
   | { type: 'error'; text: string };

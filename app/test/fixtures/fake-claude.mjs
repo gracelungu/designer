@@ -2,8 +2,8 @@
 // A stand-in for the `claude` CLI that speaks the same stream-json control protocol.
 // CI has no signed-in Claude Code, so tests drive this instead.
 import { createInterface } from 'node:readline';
-import { writeFileSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 
 const args = process.argv.slice(2);
 if (args[0] === '--version') { console.log('9.9.9 (Claude Code)'); process.exit(0); }
@@ -40,16 +40,42 @@ createInterface({ input: process.stdin }).on('line', async (line) => {
     out({ type: 'stream_event', parent_tool_use_id: null, event: { type: 'message_start', message: { id: 'msg1' } } });
     out({ type: 'stream_event', parent_tool_use_id: null, event: { type: 'content_block_start', index: 0, content_block: { type: 'text' } } });
     out({ type: 'stream_event', parent_tool_use_id: null, event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'Editing ' } } });
-    const file = join(process.cwd(), 'hello.txt');
-    const input = { file_path: file, old_string: 'hello', new_string: text };
-    out({ type: 'assistant', parent_tool_use_id: null, message: { id: 'msg1', content: [{ type: 'text', text: 'Editing now' }, { type: 'tool_use', id: 'tool1', name: 'Edit', input }] } });
-    const perm = await ask({ subtype: 'can_use_tool', tool_name: 'Edit', input, tool_use_id: 'tool1' });
-    if (perm.response.behavior === 'allow') {
-      await ask({ subtype: 'hook_callback', callback_id: 'before-edit', input: { tool_name: 'Edit', tool_input: input }, tool_use_id: 'tool1' });
-      writeFileSync(file, readFileSync(file, 'utf8').replace('hello', text));
-      await ask({ subtype: 'hook_callback', callback_id: 'after-edit', input: { tool_name: 'Edit', tool_input: input }, tool_use_id: 'tool1' });
+    if (process.env.FAKE_CLAUDE_PROMPT_OUT) writeFileSync(process.env.FAKE_CLAUDE_PROMPT_OUT, JSON.stringify({ args, prompt: text }));
+    // FAKE_CLAUDE_EDITS: a JSON list of steps, each { file, old, new } (an Edit; a missing file is created
+    // with Write) or { tool, input } (any other tool call, e.g. Bash, to check that Designer refuses it).
+    // Without it the fake edits hello.txt, replacing "hello" with the prompt.
+    const steps = process.env.FAKE_CLAUDE_EDITS
+      ? JSON.parse(process.env.FAKE_CLAUDE_EDITS)
+      : [{ file: 'hello.txt', old: 'hello', new: text }];
+    let i = 0;
+    for (const step of steps) {
+      const id = `tool${++i}`;
+      let tool, input, apply;
+      if (step.tool) {
+        tool = step.tool;
+        input = step.input;
+        apply = () => {};
+      } else {
+        const file = join(process.cwd(), step.file);
+        const exists = existsSync(file);
+        tool = exists ? 'Edit' : 'Write';
+        input = exists ? { file_path: file, old_string: step.old, new_string: step.new } : { file_path: file, content: step.new };
+        apply = () => {
+          mkdirSync(dirname(file), { recursive: true });
+          writeFileSync(file, exists ? readFileSync(file, 'utf8').replace(step.old, step.new) : step.new);
+        };
+      }
+      out({ type: 'assistant', parent_tool_use_id: null, message: { id: `msg${i}`, content: [{ type: 'text', text: 'Editing now' }, { type: 'tool_use', id, name: tool, input }] } });
+      const perm = await ask({ subtype: 'can_use_tool', tool_name: tool, input, tool_use_id: id });
+      const allowed = perm.subtype === 'success' && perm.response.behavior === 'allow';
+      if (allowed) {
+        await ask({ subtype: 'hook_callback', callback_id: 'before-edit', input: { tool_name: tool, tool_input: input }, tool_use_id: id });
+        apply();
+        await ask({ subtype: 'hook_callback', callback_id: 'after-edit', input: { tool_name: tool, tool_input: input }, tool_use_id: id });
+      }
+      out({ type: 'user', parent_tool_use_id: null, message: { content: [{ type: 'tool_result', tool_use_id: id, content: allowed ? 'ok' : (perm.response?.message ?? 'denied'), is_error: !allowed }] } });
     }
-    out({ type: 'user', parent_tool_use_id: null, message: { content: [{ type: 'tool_result', tool_use_id: 'tool1', content: perm.response.behavior === 'allow' ? 'ok' : 'denied', is_error: perm.response.behavior !== 'allow' }] } });
-    out({ type: 'result', subtype: 'success', is_error: false, uuid: 'r1', total_cost_usd: 0.01, duration_ms: 5, num_turns: 1 });
+    out({ type: 'assistant', parent_tool_use_id: null, message: { id: 'msg-done', content: [{ type: 'text', text: process.env.FAKE_CLAUDE_SUMMARY ?? 'Done.' }] } });
+    out({ type: 'result', subtype: 'success', is_error: false, uuid: 'r1', result: process.env.FAKE_CLAUDE_SUMMARY ?? 'Done.', total_cost_usd: 0.01, duration_ms: 5, num_turns: 1 });
   }
 });
