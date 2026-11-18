@@ -4,7 +4,7 @@
 
 Designer is a desktop app for product designers. You open your team's repository, see the live product and its components on an infinite canvas, and change them the way you would in a design tool. Your changes become real code through your local Claude Code, and you hand them to developers as a pull request, without touching git or a terminal.
 
-> **Status: early prototype.** The interface and flows are designed and clickable. The AI is simulated in the prototype. The local app that drives Claude Code is the next milestone (see [Roadmap](#roadmap)).
+> **Status: early.** The [app](app/) runs as a local server or a Mac app, and drives the `claude` CLI installed on your computer. The clickable prototype below shows the full design, with its AI simulated.
 >
 > [Try the clickable prototype](https://claude.ai/artifact/MWMd2fJTtkMxULsEz61p6j) · [Read the product plan and architecture](docs/plan.md)
 
@@ -100,6 +100,8 @@ The full design is in [docs/plan.md](docs/plan.md). It covers every component, t
 ## Repository layout
 
 ```
+app/                            The app: local server, web UI and Mac shell (see app/README.md)
+.github/workflows/              CI checks and the unsigned macOS build
 docs/plan.md                    Product plan and architecture
 prototype/workspace.dc.html     Source of the clickable UI prototype
 LICENSE                         Apache License 2.0
