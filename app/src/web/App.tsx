@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
-import type { Capabilities, ClaudeInstall, ProjectInfo } from '../shared/protocol';
+import type { Capabilities, ClaudeInstall, ProjectInfo, SetupState } from '../shared/protocol';
 import { api, socket } from './api';
 import { chatReducer, initialChat } from './store';
 import { Chat, Menu, Spark, type CanvasContext, type Prefs } from './components/Chat';
@@ -10,6 +10,7 @@ import { ProjectPicker } from './components/ProjectPicker';
 import { DesignPanel } from './components/DesignPanel';
 import { CodePanel, RenderedStyles, useCanvasTick } from './components/CodePanel';
 import { ComponentsPanel } from './components/ComponentsPanel';
+import { SetupCard } from './components/SetupCard';
 import { canvasHost, reconnectLive, type CanvasHost } from './canvas/host';
 
 interface Status {
@@ -70,6 +71,7 @@ type ChatView = 'chat' | 'history' | 'claude';
 function Workspace({ status }: { status: Status }) {
   const [chat, dispatch] = useReducer(chatReducer, initialChat);
   const [project, setProject] = useState<ProjectInfo | null>(null);
+  const [setup, setSetup] = useState<SetupState | null>(null);
   const [caps, setCaps] = useState<Capabilities>();
   const [capsError, setCapsError] = useState('');
   const [left, setLeft] = useState<LeftTab>('chat');
@@ -111,6 +113,12 @@ function Workspace({ status }: { status: Status }) {
         else lsDel('designer.lastProject');
         setRunning({});
         void host.load();
+        return;
+      }
+      if (m.type === 'setup') {
+        setSetup(m.setup);
+        // A finished setup may have installed or found new things: refresh the components list.
+        if (m.setup && m.setup.status !== 'running') void refreshProject();
         return;
       }
       if (m.type === 'run') {
@@ -285,8 +293,8 @@ function Workspace({ status }: { status: Status }) {
               <button className="opt" onClick={() => (setModal('project'), setProjectMenu(false))}>
                 <span>Open another project…</span>
               </button>
-              <button className="opt" onClick={() => (ask('Work out how this project runs and start it so I can see it on the canvas.', false), setProjectMenu(false))}>
-                <span>Run it</span>
+              <button className="opt" onClick={() => (void api('/api/project/setup', {}), setProjectMenu(false))}>
+                <span>Run it again</span>
               </button>
               <button className="opt" onClick={() => (void api('/api/project/close', {}), setProjectMenu(false))}>
                 <span>Close project</span>
@@ -347,6 +355,7 @@ function Workspace({ status }: { status: Status }) {
         <main className="stage">
           <Adopt el={host.stage} className="stage-host" />
           <CanvasHint editor={editor} onFigma={() => setModal('figma')} onComponents={() => setLeft('components')} />
+          <SetupCard setup={setup} onRetry={() => void api('/api/project/setup', {}).catch(() => undefined)} onAsk={(p) => ask(p, false)} />
         </main>
 
         <aside className="side right">

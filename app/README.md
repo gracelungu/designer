@@ -37,6 +37,7 @@ The chat works through the CLI's own controls:
 ## Design and code on one canvas
 
 - **No project needed to start.** Designer opens straight into a chat and a blank canvas. Add a project from the menu, or just name one in the chat; Claude opens it and works out how to run it.
+- **Zero-config project setup.** Adding a project (or reopening one) runs a setup in the background, shown as a card on the canvas: it works out the framework (Next.js, Nuxt, Remix, React Router, Astro, SvelteKit, Gatsby, Angular, Create React App, Vite with React/Vue/Svelte/Solid, Parcel, webpack, or a plain HTML folder) and the package manager (`packageManager` field, then lockfiles, looking up to a monorepo root), finds the app package in a monorepo, installs dependencies if they were never installed, starts the dev server on a free port (so it never stops to ask about a busy one), indexes the components with their props (React, Vue, Svelte) and links them to their stories, and warms Storybook. A failure shows the output with "Try again" and "Ask Claude to fix it". Code: `src/server/setup.ts` (detection and indexing) and `src/server/autosetup.ts` (the steps).
 - **Designer's own MCP server.** The server exposes `/mcp` (guarded by a per-run token) with `open_project`, `run_project`, `get_canvas`, `add_to_canvas`, `update_layers` and `show_component`, and registers it with Claude Code through `mcp_set_servers`. Figma's desktop MCP server joins the same list when connected.
 - **Live components, not whole Storybooks.** Each local dev server gets a loopback preview proxy that injects a small probe. For a story, the probe strips Storybook's padding and background, sizes the frame to the component (Hug) or to a fixed size, and reports props, sizes and rendered styles. Components sit on the canvas as `code` layers beside design layers, so both read the same.
 - **Figma | Code properties.** The right panel switches between design properties (plus the rendered styles of a code layer, in Figma terms) and code properties (component props, size, a JSX snippet, or the CSS and code link of a design layer).
@@ -87,6 +88,8 @@ The CI workflow (`.github/workflows/ci.yml`) runs on every pull request:
 
 - lint, typecheck, unit tests and build
 - a check that the built server starts and refuses API calls without the token
+
+Project setup is tested against fixture repos in `test/fixtures/projects` (Next + pnpm, React/Vite + yarn, Vue/Vite + npm, SvelteKit + bun, CRA, Angular with a `packageManager` field, a pnpm monorepo, a plain HTML folder). `test/smoke.test.ts` boots the real server on a copy of a fixture, runs a real `npm install` and real dev servers, and checks the page answers. `npm run test:smoke` also installs React, Vue, Next.js and Svelte apps from the registry with npm, pnpm, yarn and bun and starts their real dev servers (needs the network, so it is not part of `npm test`).
 
 The tests drive a stand-in `claude` (`test/fixtures/fake-claude.mjs`) that speaks the same protocol. They cover streaming, permission allow and deny, the before/after snapshots and rewind.
 

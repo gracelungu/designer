@@ -1,0 +1,1 @@
+{ "name": "vite-react-yarn", "scripts": { "dev": "vite", "build": "vite build", "preview": "vite preview", "storybook": "storybook dev -p 6106" }, "dependencies": { "react": "19.0.0" }, "devDependencies": { "vite": "6.0.0", "@vitejs/plugin-react": "4.0.0", "storybook": "8.0.0" } }

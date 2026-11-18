@@ -1,5 +1,29 @@
 import { useState } from 'react';
-import type { ProjectInfo } from '../../shared/protocol';
+import type { ComponentEntry, ProjectInfo } from '../../shared/protocol';
+
+const storyPrompt = (c: ComponentEntry) =>
+  `Write a Storybook story file (CSF3) for the ${c.name} component in ${c.file}${c.exportName === 'default' ? ' (default export)' : ''}, with one story per meaningful variant of its props${c.props.length ? ` (${c.props.map((p) => p.name).join(', ')})` : ''}. Set Storybook up first if the repo does not have it, following the repo's tooling. Then show it on the canvas.`;
+
+/** Components found in the source that have no story yet: the canvas renders a component from its story. */
+function Unstoried({ list, onAsk }: { list: ComponentEntry[]; onAsk: (p: string) => void }) {
+  if (!list.length) return null;
+  return (
+    <>
+      <div className="comp-section">Without a story yet · {list.length}</div>
+      {list.map((c) => (
+        <div key={`${c.file}#${c.exportName}`} className="comp-entry">
+          <div className="comp-story" style={{ paddingLeft: 12 }} title={c.file}>
+            <span>
+              <span className="code-glyph">{'</>'}</span> <span className="comp-name">{c.name}</span> <span className="faint" style={{ opacity: 1 }}>{c.file.split('/').slice(-2, -1)[0] ?? ''}</span>
+            </span>
+            <button className="btn small ghost" onClick={() => onAsk(storyPrompt(c))}>Make story</button>
+          </div>
+          {c.props.length > 0 && <div className="comp-props mono">{c.props.slice(0, 8).map((p) => `${p.name}${p.optional ? '?' : ''}`).join(', ')}{c.props.length > 8 ? ', …' : ''}</div>}
+        </div>
+      ))}
+    </>
+  );
+}
 
 /** The repo's components, from its stories. Clicking one puts it on the canvas, rendered live from code. */
 export function ComponentsPanel({
@@ -29,11 +53,20 @@ export function ComponentsPanel({
       </div>
     );
   const list = project.stories.filter((e) => !filter || e.title.toLowerCase().includes(filter.toLowerCase()));
+  const components = project.components ?? [];
+  const unstoried = components.filter((c) => !c.storyIds.length && (!filter || c.name.toLowerCase().includes(filter.toLowerCase())));
   if (!project.stories.length)
     return (
-      <div className="empty">
-        No component stories in this repo yet. Designer renders each component on the canvas from its story.
-        <div style={{ marginTop: 10 }}>
+      <div className={components.length ? 'scroll components-panel' : 'empty'}>
+        {components.length ? (
+          <div className="hint" style={{ paddingTop: 10 }}>
+            Found {components.length} component{components.length === 1 ? '' : 's'} in this repo. The canvas renders a component from its story, so give it one to place it.
+          </div>
+        ) : (
+          'No component stories in this repo yet. Designer renders each component on the canvas from its story.'
+        )}
+        {components.length > 0 && <Unstoried list={unstoried} onAsk={onAsk} />}
+        <div style={{ margin: components.length ? '10px 12px' : '10px 0 0' }}>
           <button className="btn" onClick={() => onAsk('Find the main reusable UI components in this repo and write a Storybook story file (CSF3) for each one, with one story per meaningful variant. Set Storybook up first if the repo does not have it, following the repo’s tooling. Then show the Button (or the most used component) on the canvas.')}>
             Ask Claude to set up components
           </button>
@@ -80,6 +113,7 @@ export function ComponentsPanel({
           </div>
         );
       })}
+      <Unstoried list={unstoried} onAsk={onAsk} />
     </div>
   );
 }
