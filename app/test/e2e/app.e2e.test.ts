@@ -132,9 +132,9 @@ describe('design tokens', () => {
   it('edits a token and writes it to the stylesheet', async () => {
     await page.getByRole('tab', { name: /Code/ }).click();
     await page.getByRole('button', { name: 'Tokens' }).click();
-    const row = page.locator('.row', { hasText: '--radius-md' });
+    const row = page.locator('.tok-row', { hasText: '--radius-md' });
     await row.waitFor();
-    const input = row.locator('input.input');
+    const input = row.locator('input.tok-input');
     await input.fill('14px');
     await input.press('Enter');
     await expect.poll(() => readFileSync(join(workspace, 'Lumen demo', 'src', 'tokens.css'), 'utf8')).toContain('--radius-md: 14px;');
@@ -179,9 +179,9 @@ describe('Figma import', () => {
 describe('versions', () => {
   it('saves a version of the demo', async () => {
     await page.getByRole('button', { name: /Save version/ }).click();
-    await page.getByPlaceholder(/What changed/).fill('Rounder cards');
+    await page.getByPlaceholder(/Title, e.g./).fill('Rounder cards');
     await page.locator('.modal').getByRole('button', { name: 'Save version' }).click();
-    await page.locator('.toast', { hasText: /Saved \d+ file/ }).waitFor();
+    await page.locator('.toast', { hasText: /Saved “Rounder cards”/ }).waitFor();
   });
 
   it('opens the demo again from Add a project', async () => {

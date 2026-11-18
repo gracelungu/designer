@@ -39,7 +39,11 @@ git(project, 'remote', 'add', 'origin', 'https://dev.azure.com/contoso/Shop/_git
 writeFileSync(join(project, 'package.json'), JSON.stringify({ name: 'shop', scripts: {} }));
 
 const { startServer } = await import(join(app, 'dist', 'server', 'index.mjs'));
-const server = await startServer({ port: 0, staticDir: join(app, 'dist', 'web'), initialProject: project, workspace: tmp() });
+const ws = tmp();
+// Past the first-run welcome, so the smoke test lands on the canvas.
+mkdirSync(join(ws, '.designer'), { recursive: true });
+writeFileSync(join(ws, '.designer', 'settings.json'), JSON.stringify({ onboardedAt: new Date().toISOString() }));
+const server = await startServer({ port: 0, staticDir: join(app, 'dist', 'web'), initialProject: project, workspace: ws, autoSetup: false });
 
 const results = [];
 const errors = [];

@@ -59,12 +59,17 @@ chmodSync(fake, 0o755);
 const bin = tmp();
 symlinkSync(fake, join(bin, 'claude'));
 const port = 4900 + Math.floor(Math.random() * 400);
+// A workspace past the first-run welcome, so the app opens straight onto the canvas.
+const ws = tmp();
+mkdirSync(join(ws, '.designer'), { recursive: true });
+writeFileSync(join(ws, '.designer', 'settings.json'), JSON.stringify({ onboardedAt: new Date().toISOString() }));
 const server = spawn(process.execPath, [join(app, 'dist', 'server', 'cli.mjs'), '--project', mine, '--port', String(port), '--no-open'], {
   cwd: app,
   env: {
     ...process.env,
     PATH: `${bin}${delimiter}${process.env.PATH}`,
     HOME: tmp(),
+    DESIGNER_WORKSPACE: ws,
     FAKE_CLAUDE_EDITS: JSON.stringify([{ file: 'src/Button.css', old: 'background: #111111', new: 'background: #2563eb' }]),
     FAKE_CLAUDE_SUMMARY: 'src/Button.css: the button background is now #2563eb.',
   },

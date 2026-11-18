@@ -54,6 +54,7 @@ Figma variables and the repo's tokens show up as one list (Code › Tokens), eac
 - **Drift:** the Code tab and Tokens tab carry a count, the Tokens tab has a banner, and **Use Figma value** writes Figma's value into the CSS or Tailwind file in the notation already used there (hex or rgb, px or rem). Figma's desktop server can't change variables, so for the other direction there is **Copy code value**.
 - **Properties panel:** with a layer selected, the Figma side lists the token behind each fill, stroke, radius, font, gap and padding value, flags values whose token differs, and points out hard-coded values.
 - **Claude** reads the same pairs through the `get_design_tokens` tool, so "fix the drift" or "use our tokens" works from the chat.
+
 ## Design and code, both ways
 
 Layers linked to code stay in step with it in both directions. A linked layer is a design layer with a code link (set by Figma import, by Claude, or with **Link to a component** in the Code panel), or a live component on the canvas.
@@ -61,30 +62,20 @@ Layers linked to code stay in step with it in both directions. A linked layer is
 - **Canvas to code.** When you edit a linked layer (fill, stroke, corner radius, auto layout, padding, gap, text and its font), or change a live component's props, a bar on the canvas says the layer has edits that aren't in code yet. **Send to code** runs your local Claude Code headless in the project, with only read and edit tools (commands and edits outside the repo are refused). It edits the component, using your tokens where one matches. You review the diff and choose **Keep** or **Discard**. Discard puts each file back, unless it changed again since.
 - **Code to canvas.** Designer watches the project's git HEAD. After **Get latest**, a pull in a terminal, a commit or a branch switch, it reloads live components and renders each linked component out of sight. Then it updates the linked design layers with what changed in code. This is a three-way merge: a property only the code changed is applied, and a property you also changed on the canvas asks you to choose **Use code** or **Keep my design**.
 - Each linked layer keeps a small sync record (`sync` in `.designer/canvas.json`): its properties when design and code last matched, and how the code rendered then.
+
 ## Working with the team
 
 - **Comments on the canvas.** Press C and click a frame to pin a comment; it follows the frame when it moves. Each thread is saved as its own file in `<project>/.designer/comments/<id>.json`, signed with your git `user.name`, so comments travel with Save version, merge cleanly when two people comment at once, and appear for everyone after Get latest. The **Comments** tab lists them; **Fix with Claude** hands one to Claude, which can read comments (`get_comments`) and reply or resolve them (`reply_to_comment`) through Designer's MCP server.
-- **A design preview for developers.** *Export design preview* (project menu) writes `.designer/preview/`: one SVG per top-level frame, a `README.md` that GitHub and Azure DevOps render with the frames, comments and linked components, and a self-contained `index.html` with comment pins and CSS (also downloaded). **Share for review** includes it by default: it commits the preview and comments, pushes the branch, and puts the preview link in the pull request.
+- **A design preview for developers.** *Export design preview* (project menu) writes `.designer/preview/`: one SVG per top-level frame, a `README.md` that GitHub and Azure DevOps render with the frames, comments and linked components, and a self-contained `index.html` with comment pins and CSS (also downloaded). **Share for review** can include it (tick *Include a design preview for developers*): the preview and comments go into the change, and the pull request links to the preview.
 - **Pull requests and their comments.** The **Comments › Pull requests** view lists open pull requests for the project's remote and lets you read, reply to and (on Azure DevOps) resolve their comment threads.
   - **Azure DevOps** remotes (`dev.azure.com`, `ssh.dev.azure.com`, `*.visualstudio.com`) go through Microsoft's Azure DevOps MCP server, started locally as `npx -y @azure-devops/mcp <organization>`. It signs in with your Microsoft account the first time; Designer holds no token. Claude Code gets the same server, so it can work with PRs from the chat. Set `DESIGNER_AZURE_MCP` to a JSON array (such as `["node","/path/server.js"]`) to run a different command; the organization is appended.
   - **GitHub** remotes use the GitHub CLI with your own `gh auth login`.
 
-## Tests
-
-```bash
-npm test                         # unit and server tests (vitest)
-npm run build && npm run test:smoke:collab   # the collaboration features in a real browser (Playwright)
-node ../editor/tests/e2e.cjs     # the canvas editor
-```
-
-Claude Code and the Azure DevOps MCP server are replaced by stand-ins in `test/fixtures/`, so the tests need neither a sign-in nor network.
 ## Visual review, sharing and versions
 
 - **Before and after for every change.** When Claude is about to edit a file, Designer photographs the components on the canvas and the stories that show that file, in a headless Chrome, Edge, Brave or Chromium it finds on your computer (or `DESIGNER_BROWSER`). When Claude's turn ends it photographs them again and compares them pixel by pixel. Code › Changes lists each change with Side by side, Slider and Highlight views. Token edits get the same treatment. Pictures live in `.designer/reviews/`, kept out of git through `.git/info/exclude`.
 - **Share for review, in one click.** Saves your changes on a branch of their own, uploads the pictures to a `designer-screenshots` branch (so they never enter the change itself), pushes, and opens a pull request whose description shows before and after. It uses `gh` when it is signed in; otherwise it opens GitHub's (or GitLab's, or Azure DevOps') new pull request page with everything filled in.
 - **Versions tab, like Figma's version history.** Named versions (git tags under `version/`), every saved version with Restore (a new version with the old content, so nothing is lost), variations (branches) you can open, merge in or remove, and Sync with the team. Switching or restoring saves unsaved work first.
-
-Tests: `npm test` runs everything, including `test/smoke-visual.test.ts`, which drives the built app (`npm run build` first) in a real browser with a stand-in Claude Code, Storybook and GitHub remote. Set `SMOKE_SHOTS=<folder>` to keep its screenshots.
 
 ## Run it as a local server
 
@@ -97,8 +88,6 @@ npm run build
 npm start                 # opens http://127.0.0.1:4818
 npm start -- --project ~/code/my-repo --port 4818 --no-open
 ```
-
-Tests: `npm test` runs the unit and integration tests (a fake `claude` in `test/fixtures` speaks the real stream-json protocol, so no sign-in or credits are needed). `npm run build && npm run test:smoke:sync` drives the built app in Chromium through both sync directions, with a real git project and a stand-in Storybook.
 
 For development, run `npm run dev`. Vite then serves the UI on port 5173 and the server runs on port 4818.
 
@@ -144,8 +133,11 @@ The app checks GitHub releases 10 seconds after launch and every 6 hours, or fro
 | `npm run test:smoke` | Starts the desktop app headless and checks the window, onboarding, native bridge and demo. Pass a packaged binary path to `node test/smoke/electron-smoke.mjs` to check a release build |
 | `npm run smoke:ui` | Builds the UI and drives the Tokens tab in Chromium; `SHOTS=<dir>` saves screenshots |
 | `npm run test:smoke:setup` | Installs real apps from the registry and starts their dev servers (needs the network) |
+| `npm run test:smoke:sync` | Both sync directions in Chromium, with a real git project and a stand-in Storybook (build first) |
+| `npm run test:smoke:collab` | Comments, the design preview and pull request comments in Chromium (build first) |
+| `test/smoke-visual.test.ts` (part of `npm test`, runs once the app is built) | Visual review, Share for review and Versions in a real browser with a stand-in Claude Code, Storybook and GitHub remote; `SMOKE_SHOTS=<dir>` keeps screenshots |
 
-`.github/workflows/ci.yml` runs all of them on every pull request.
+`.github/workflows/ci.yml` runs the unit, e2e, editor and desktop smoke tests on every pull request. Claude Code and the Azure DevOps MCP server are replaced by stand-ins in `test/fixtures/`, so the tests need neither a sign-in nor network.
 
 Project setup is tested against fixture repos in `test/fixtures/projects` (Next + pnpm, React/Vite + yarn, Vue/Vite + npm, SvelteKit + bun, CRA, Angular with a `packageManager` field, a pnpm monorepo, a plain HTML folder). `test/smoke-setup.test.ts` boots the real server on a copy of a fixture, runs a real `npm install` and real dev servers, and checks the page answers. `npm run test:smoke:setup` also installs React, Vue, Next.js and Svelte apps from the registry with npm, pnpm, yarn and bun and starts their real dev servers (needs the network, so it is not part of `npm test`).
 

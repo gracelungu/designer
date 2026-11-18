@@ -58,7 +58,11 @@ describe.skipIf(!browserPath || !existsSync(join(web, 'index.html')))('smoke: vi
     process.env.DESIGNER_CLAUDE_PATH = join(__dirname, 'fixtures', 'fake-claude.mjs');
     process.env.FAKE_CLAUDE_FILE = 'src/Button.css';
     process.env.FAKE_CLAUDE_FROM = 'red';
-    server = await startServer({ staticDir: web, initialProject: dir, workspace: realpathSync(mkdtempSync(join(tmpdir(), 'designer-ws-'))), gh: gh.bin, settleMs: 100 });
+    const ws = realpathSync(mkdtempSync(join(tmpdir(), 'designer-ws-')));
+    // Past the first-run welcome, and without the automatic setup (this test runs its own Storybook).
+    mkdirSync(join(ws, '.designer'));
+    writeFileSync(join(ws, '.designer', 'settings.json'), JSON.stringify({ onboardedAt: new Date().toISOString() }));
+    server = await startServer({ staticDir: web, initialProject: dir, workspace: ws, gh: gh.bin, settleMs: 100, autoSetup: false });
     const { chromium } = await import('playwright-core');
     browser = await chromium.launch({ executablePath: browserPath });
     page = await browser.newPage({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: shotsDir ? 2 : 1 });

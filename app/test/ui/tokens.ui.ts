@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { startServer } from '../../src/server/index';
+import { onboardedWorkspace } from '../fixtures/workspace';
 import { fakeFigma } from '../fixtures/fakeFigma';
 
 // Playwright is not a dependency of the app (it comes with the dev machine or CI image), so it is loaded untyped.
@@ -37,7 +38,7 @@ describe('smoke (browser): one source of truth for tokens', () => {
     cpSync(join(__dirname, '..', 'fixtures', 'token-repo'), repo, { recursive: true });
     figma = await fakeFigma({ selection: '', variables: JSON.stringify({ 'Color/Primary': '#2563EB', 'Radius/Card': '12', 'Space/4': '16', 'Color/Success': '#16A34A' }) });
     process.env.DESIGNER_CLAUDE_PATH = join(__dirname, '..', 'fixtures', 'fake-claude.mjs');
-    server = await startServer({ port: 0, staticDir: WEB, initialProject: repo, workspace: mkdtempSync(join(tmpdir(), 'designer-ws-')), figmaUrls: [figma.url] });
+    server = await startServer({ port: 0, staticDir: WEB, initialProject: repo, workspace: onboardedWorkspace(), figmaUrls: [figma.url], autoSetup: false });
     const { chromium } = createRequire(import.meta.url)('playwright');
     browser = await chromium.launch();
     page = await browser.newPage({ viewport: { width: 1440, height: 900 } });

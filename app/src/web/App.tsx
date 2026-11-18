@@ -277,11 +277,12 @@ function Workspace({ status, start }: { status: Status; start?: StartChoice }) {
 
   const gitAction = async (path: string, body: unknown) => {
     try {
-      const r = await api<{ ok: boolean; message: string; url?: string }>(path, body);
+      const r = await api<{ ok: boolean; message: string; url?: string; files?: string[] }>(path, body);
       setToast({ text: r.message, url: r.url });
       await refreshProject();
-      // What the team changed (designs, comments) shows on the canvas straight away.
-      if (path === '/api/git/latest' && r.ok) await host.load();
+      // What the team changed in the design (canvas, comments) shows on the canvas straight away.
+      // Code-only pulls leave the canvas alone: linked layers follow the code through sync instead.
+      if (path === '/api/git/latest' && r.ok && (!r.files || r.files.some((f) => f.startsWith('.designer/')))) await host.load();
     } catch (e) {
       setToast({ text: (e as Error).message });
     }
