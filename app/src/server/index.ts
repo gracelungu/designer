@@ -8,6 +8,7 @@ import { WebSocketServer, type WebSocket } from 'ws';
 import { detectClaude, permissionModes } from './claude.js';
 import { ClaudeSession } from './session.js';
 import { listSessions } from './transcripts.js';
+import { findTokens, updateToken } from './tokens.js';
 import { DevProcess, diffFor, getLatest, listDir, projectInfo, readMemory, saveVersion, shareForReview, writeMemory } from './project.js';
 import type { Capabilities, ClaudeInstall, ClientMessage, ServerMessage } from '../shared/protocol.js';
 
@@ -96,6 +97,12 @@ export async function startServer(opts: ServerOptions = {}) {
     'POST /api/memory': async (body) => {
       await writeMemory(requireProject(), String(body.path), String(body.content ?? ''));
       return readMemory(requireProject());
+    },
+    'GET /api/tokens': async () => findTokens(requireProject()),
+    'POST /api/tokens': async (body) => {
+      const r = await updateToken(requireProject(), String(body.file), Number(body.line), String(body.name), String(body.value));
+      broadcast({ type: 'file-change', change: { toolUseId: `token-${Date.now()}`, tool: 'Token', path: r.path, before: r.before, after: r.after } });
+      return findTokens(requireProject());
     },
     'GET /api/diff': async (_b, url) => diffFor(requireProject(), String(url.searchParams.get('path'))),
     'POST /api/git/latest': async () => getLatest(requireProject()),

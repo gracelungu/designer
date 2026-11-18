@@ -8,6 +8,7 @@ import { ComponentsView } from './components/ComponentsView';
 import { Changes } from './components/Changes';
 import { ClaudePanel, FigmaModal, SessionsPanel } from './components/ClaudePanel';
 import { ProjectPicker } from './components/ProjectPicker';
+import { DesignPanel } from './components/DesignPanel';
 
 interface Status {
   claude: ClaudeInstall;
@@ -98,6 +99,7 @@ function Workspace({ project, setProject, claude, onSwitch, isMac }: { project: 
   const [storybookUrl, setStorybookUrl] = useState<string>();
   const [starting, setStarting] = useState<'app' | 'storybook' | null>(null);
   const [context, setContext] = useState<string>();
+  const [right, setRight] = useState<'design' | 'changes'>('design');
   const [reloadKey, setReloadKey] = useState(0);
   const [prefs, setPrefs] = useState(() => ({ model: localStorageGet('designer.model') ?? undefined, effort: localStorageGet('designer.effort') ?? undefined, mode: localStorageGet('designer.mode') ?? undefined }));
 
@@ -111,7 +113,11 @@ function Workspace({ project, setProject, claude, onSwitch, isMac }: { project: 
     socket.connect();
     const off = socket.on((m) => {
       dispatch(m);
-      if (m.type === 'item' && m.item.kind === 'result') void refreshProject();
+      if (m.type === 'item' && m.item.kind === 'result') {
+        void refreshProject();
+        // Dev servers with hot reload update the frames themselves; a reload covers the ones without it.
+        setReloadKey((k) => k + 1);
+      }
     });
     // Start Claude Code in this folder with the last-used model, effort and mode, then read what it offers.
     socket.send({ type: 'start', model: prefs.model, effort: prefs.effort, mode: prefs.mode });
@@ -295,9 +301,16 @@ function Workspace({ project, setProject, claude, onSwitch, isMac }: { project: 
 
         <div className="side right">
           <div className="tabs">
-            <button className="on">Changes</button>
+            <button className={right === 'design' ? 'on' : ''} onClick={() => setRight('design')}>Design</button>
+            <button className={right === 'changes' ? 'on' : ''} onClick={() => setRight('changes')}>
+              Changes {chat.changes.length > 0 && <span className="badge dark" style={{ display: 'inline-grid', marginLeft: 4 }}>{new Set(chat.changes.map((c) => c.path)).size}</span>}
+            </button>
           </div>
-          <Changes changes={chat.changes} git={project.git} />
+          {right === 'design' ? (
+            <DesignPanel onAsk={ask} onChanged={() => (void refreshProject(), setReloadKey((k) => k + 1))} />
+          ) : (
+            <Changes changes={chat.changes} git={project.git} />
+          )}
         </div>
       </div>
 
