@@ -10,6 +10,8 @@ import { ProjectPicker } from './components/ProjectPicker';
 import { DesignPanel } from './components/DesignPanel';
 import { CodePanel, RenderedStyles, useCanvasTick } from './components/CodePanel';
 import { ComponentsPanel } from './components/ComponentsPanel';
+import { LayerTokens } from './components/LayerTokens';
+import { useTokenReport } from './tokens';
 import { canvasHost, reconnectLive, type CanvasHost } from './canvas/host';
 
 interface Status {
@@ -75,7 +77,9 @@ function Workspace({ status }: { status: Status }) {
   const [left, setLeft] = useState<LeftTab>('chat');
   const [chatView, setChatView] = useState<ChatView>('chat');
   const [side, setSide] = useState<'figma' | 'code'>('figma');
-  const [codeTab, setCodeTab] = useState<'tokens' | 'changes'>('changes');
+  const [codeTab, setCodeTab] = useState<'layer' | 'tokens' | 'changes'>('changes');
+  const tokens = useTokenReport();
+  const drift = tokens.report?.summary.drift ?? 0;
   const [modal, setModal] = useState<'save' | 'share' | 'figma' | 'project' | null>(null);
   const [projectMenu, setProjectMenu] = useState(false);
   const [toast, setToast] = useState<{ text: string; url?: string; busy?: boolean }>();
@@ -237,6 +241,18 @@ function Workspace({ status }: { status: Status }) {
   const changedFiles = new Set(chat.changes.map((c) => c.path)).size;
   const git = project?.git;
   const hasSelection = editor.store.selection.length > 0;
+  // Selecting a layer shows its code; the Tokens and Changes tabs stay one click away.
+  const [lastSel, setLastSel] = useState(hasSelection);
+  if (lastSel !== hasSelection) {
+    setLastSel(hasSelection);
+    if (hasSelection) setCodeTab('layer');
+    else if (codeTab === 'layer') setCodeTab('changes');
+  }
+  const openTokens = () => (setSide('code'), setCodeTab('tokens'));
+
+  const codePanel = (
+    <CodePanel editor={editor} stories={project?.stories ?? []} onAsk={(p) => (p.endsWith(': ') ? (setLeft('chat'), setChatView('chat'), window.dispatchEvent(new CustomEvent('designer:focus-chat'))) : ask(p))} onShowStory={(id, next) => void placeStory(id, next)} />
+  );
 
   const chatHeader = (
     <div className="chat-head">
@@ -360,6 +376,11 @@ function Workspace({ status }: { status: Status }) {
                 <svg width="12" height="12" viewBox="0 0 16 16" aria-hidden="true"><path d="M5.5 4.5L2 8l3.5 3.5M10.5 4.5L14 8l-3.5 3.5" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" /></svg>
                 Code
                 {changedFiles > 0 && <span className="badge dark">{changedFiles}</span>}
+                {drift > 0 && (
+                  <span className="badge" title={`${drift} token${drift === 1 ? '' : 's'} differ between Figma and code`} aria-label={`${drift} tokens differ`}>
+                    {drift}!
+                  </span>
+                )}
               </button>
             </div>
           </div>
@@ -367,21 +388,35 @@ function Workspace({ status }: { status: Status }) {
             <div className="scroll">
               <Adopt el={host.propsEl} />
               <RenderedStyles editor={editor} />
+              {project && <LayerTokens editor={editor} onOpenTokens={openTokens} />}
             </div>
           </div>
           <div className={`pane ${side === 'code' ? '' : 'hidden'}`} data-canvas-keys="off">
-            {hasSelection ? (
-              <CodePanel editor={editor} stories={project?.stories ?? []} onAsk={(p) => (p.endsWith(': ') ? (setLeft('chat'), setChatView('chat'), window.dispatchEvent(new CustomEvent('designer:focus-chat'))) : ask(p))} onShowStory={(id, next) => void placeStory(id, next)} />
-            ) : project ? (
+            {project ? (
               <>
                 <div className="tabs sub">
+                  {hasSelection && (
+                    <button className={codeTab === 'layer' ? 'on' : ''} onClick={() => setCodeTab('layer')}>
+                      Layer
+                    </button>
+                  )}
                   <button className={codeTab === 'changes' ? 'on' : ''} onClick={() => setCodeTab('changes')}>
                     Changes {changedFiles > 0 && <span className="badge dark">{changedFiles}</span>}
                   </button>
-                  <button className={codeTab === 'tokens' ? 'on' : ''} onClick={() => setCodeTab('tokens')}>Tokens</button>
+                  <button className={codeTab === 'tokens' ? 'on' : ''} onClick={() => setCodeTab('tokens')}>
+                    Tokens {drift > 0 && <span className="badge">{drift}</span>}
+                  </button>
                 </div>
-                {codeTab === 'tokens' ? <DesignPanel onAsk={(p) => ask(p, false)} onChanged={() => void refreshProject()} /> : <Changes changes={chat.changes} git={project.git} />}
+                {codeTab === 'layer' && hasSelection ? (
+                  codePanel
+                ) : codeTab === 'tokens' ? (
+                  <DesignPanel onAsk={(p) => ask(p, false)} onChanged={() => void refreshProject()} />
+                ) : (
+                  <Changes changes={chat.changes} git={project.git} />
+                )}
               </>
+            ) : hasSelection ? (
+              codePanel
             ) : (
               <div className="empty">Select a layer to see it as code. Add a project to see its tokens and what changed.</div>
             )}

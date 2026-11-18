@@ -8,7 +8,9 @@ import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { findTokens, replaceTokenValue } from './tokens.js';
 import type { FigmaClient } from './figma.js';
-import { parseFigmaVariables, summarize, syncTokens, toCodeValue, type CodeToken, type FigmaVariable, type SyncSummary, type TokenKind, type TokenPair } from '../shared/tokenSync.js';
+import { parseFigmaVariables, summarize, syncTokens, toCodeValue, type CodeToken, type FigmaVariable, type TokenKind, type TokenReport } from '../shared/tokenSync.js';
+
+export type { TokenReport };
 
 export const SNAPSHOT_FILE = '.designer/figma-variables.json';
 export const LINKS_FILE = '.designer/token-links.json';
@@ -19,12 +21,6 @@ export interface FigmaSnapshot {
   variables: FigmaVariable[];
 }
 
-export interface TokenReport {
-  pairs: TokenPair[];
-  summary: SyncSummary;
-  figma: { source: FigmaSnapshot['source']; pulledAt: string; count: number } | null;
-  links: Record<string, string>;
-}
 
 // ---------- Tailwind config ----------
 
@@ -44,7 +40,7 @@ function stripComments(src: string): string {
       }
       out += src[i] ?? '';
     } else if (ch === '/' && src[i + 1] === '/') {
-      while (i < src.length && src[i] !== '\n') (out += ' '), i++;
+      for (; i < src.length && src[i] !== '\n'; i++) out += ' ';
       out += src[i] ?? '';
     } else if (ch === '/' && src[i + 1] === '*') {
       for (; i < src.length && !(src[i] === '*' && src[i + 1] === '/'); i++) out += src[i] === '\n' ? '\n' : ' ';
@@ -337,7 +333,7 @@ export async function importVariables(cwd: string, json: string) {
   try {
     vars = parseFigmaVariables(json);
   } catch (e) {
-    throw new Error(`That isn't a Figma variables file: ${(e as Error).message}`);
+    throw new Error(`That isn't a Figma variables file: ${(e as Error).message}`, { cause: e });
   }
   if (!vars.length) throw new Error('No variables found in that file.');
   await saveSnapshot(cwd, vars, 'import');

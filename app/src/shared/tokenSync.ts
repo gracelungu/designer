@@ -54,6 +54,14 @@ export interface SyncSummary {
   codeOnly: number;
 }
 
+/** What the server sends the UI: every pair, the counts, and where the Figma side came from. */
+export interface TokenReport {
+  pairs: TokenPair[];
+  summary: SyncSummary;
+  figma: { source: 'figma-desktop' | 'import'; pulledAt: string; count: number } | null;
+  links: Record<string, string>;
+}
+
 // ---------- names ----------
 
 const GROUP_SYNONYMS: Record<string, string> = {

@@ -37,10 +37,29 @@ The chat works through the CLI's own controls:
 ## Design and code on one canvas
 
 - **No project needed to start.** Designer opens straight into a chat and a blank canvas. Add a project from the menu, or just name one in the chat; Claude opens it and works out how to run it.
-- **Designer's own MCP server.** The server exposes `/mcp` (guarded by a per-run token) with `open_project`, `run_project`, `get_canvas`, `add_to_canvas`, `update_layers` and `show_component`, and registers it with Claude Code through `mcp_set_servers`. Figma's desktop MCP server joins the same list when connected.
+- **Designer's own MCP server.** The server exposes `/mcp` (guarded by a per-run token) with `open_project`, `run_project`, `get_canvas`, `add_to_canvas`, `update_layers`, `show_component` and `get_design_tokens`, and registers it with Claude Code through `mcp_set_servers`. Figma's desktop MCP server joins the same list when connected.
 - **Live components, not whole Storybooks.** Each local dev server gets a loopback preview proxy that injects a small probe. For a story, the probe strips Storybook's padding and background, sizes the frame to the component (Hug) or to a fixed size, and reports props, sizes and rendered styles. Components sit on the canvas as `code` layers beside design layers, so both read the same.
 - **Figma | Code properties.** The right panel switches between design properties (plus the rendered styles of a code layer, in Figma terms) and code properties (component props, size, a JSX snippet, or the CSS and code link of a design layer).
 - The canvas is saved to `<project>/.designer/canvas.json`, or `~/Designer/canvas.json` with no project.
+
+## Design tokens: one source of truth
+
+Figma variables and the repo's tokens show up as one list (Code › Tokens), each pair marked **In sync**, **Differs**, **Only in Figma** or **Only in code**.
+
+- **Code side:** CSS custom properties in any stylesheet (`:root`, theme selectors, Tailwind v4 `@theme`) and the `theme` / `theme.extend` values of a Tailwind v3 `tailwind.config.*` (colours, spacing, radii, font families and sizes, shadows). `var()` references are followed.
+- **Figma side:** **Pull from Figma** reads the variables used by the current selection through the desktop MCP server (`get_variable_defs`); later pulls add to earlier ones. **Import file…** takes a Figma REST variables export (with modes and aliases), W3C design tokens or a Tokens Studio file. Either way they're saved to `.designer/figma-variables.json`, so the team gets them with the repo and sees the same drift after Get latest.
+- **Matching:** names are compared after normalising them, so `Color/Primary/500`, `--color-primary-500` and `colors.primary.500` pair up. Groups can be left out (`Brand/500` finds `colors.brand.500`). A Figma mode named Dark pairs with a dark selector such as `[data-theme="dark"]` or `.dark`. When names really differ, **Link to a code token…** saves the pair to `.designer/token-links.json`.
+- **Values** are compared as a designer would: `#2563EB`, `rgb(37 99 235)` and Figma's 0–1 RGBA are the same colour, and `16`, `16px` and `1rem` are the same size.
+- **Drift:** the Code tab and Tokens tab carry a count, the Tokens tab has a banner, and **Use Figma value** writes Figma's value into the CSS or Tailwind file in the notation already used there (hex or rgb, px or rem). Figma's desktop server can't change variables, so for the other direction there is **Copy code value**.
+- **Properties panel:** with a layer selected, the Figma side lists the token behind each fill, stroke, radius, font, gap and padding value, flags values whose token differs, and points out hard-coded values.
+- **Claude** reads the same pairs through the `get_design_tokens` tool, so "fix the drift" or "use our tokens" works from the chat.
+
+## Tests
+
+```bash
+npm test            # unit, feature and server smoke tests (no browser needed)
+npm run smoke:ui    # builds the UI and drives it in Chromium (needs Playwright); SHOTS=<dir> saves screenshots
+```
 
 ## Run it as a local server
 

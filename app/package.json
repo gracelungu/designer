@@ -26,7 +26,8 @@
     "dist:mac": "npm run build && electron-builder --mac --publish never",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
-    "test": "vitest run"
+    "test": "vitest run",
+    "smoke:ui": "npm run build && vitest run --config vitest.ui.config.ts"
   },
   "dependencies": {
     "ws": "^8.23.0"
