@@ -9,6 +9,7 @@ import { detectClaude, permissionModes } from './claude.js';
 import { ClaudeSession } from './session.js';
 import { listSessions } from './transcripts.js';
 import { findTokens, updateToken } from './tokens.js';
+import { importVariables, pullFromFigma, setLink, tokenReport, useFigmaValue } from './designTokens.js';
 import { DevProcess, diffFor, findRunningStorybook, getLatest, listDir, projectInfo, readMemory, saveVersion, shareForReview, writeMemory } from './project.js';
 import { PreviewProxies } from './proxy.js';
 import { handleMcp, SYSTEM_PROMPT, type ToolHost } from './mcp.js';
@@ -24,6 +25,8 @@ export interface ServerOptions {
   token?: string;
   /** Where Claude works before a project is open (default ~/Designer). */
   workspace?: string;
+  /** Where to look for Figma's desktop MCP server (tests point this at a stand-in). */
+  figmaUrls?: string[];
 }
 
 /** Only answer requests addressed to loopback, which blocks DNS-rebinding pages. */
@@ -164,6 +167,16 @@ export async function startServer(opts: ServerOptions = {}) {
       const r = await askCanvas({ kind: 'show-component', storyId, title, src, args, nextToSelection, file: entry?.file });
       return `Placed ${title} on the canvas, rendered live from code. ${JSON.stringify(r)}`;
     },
+    designTokens: async (status) => {
+      if (!projectPath) throw new Error('No project is open.');
+      const r = await tokenReport(projectPath);
+      const pairs = status ? r.pairs.filter((p) => p.status === status) : r.pairs;
+      return {
+        figma: r.figma ?? 'No Figma variables pulled yet. The user can pull them from the Tokens tab, or you can read them with the figma MCP server (get_variable_defs).',
+        summary: r.summary,
+        tokens: pairs.map((p) => ({ status: p.status, mode: p.mode, figma: p.figma && `${p.figma.name} = ${p.figma.value}`, code: p.code && `${p.code.name} = ${p.code.value} (${p.code.file}:${p.code.line}, ${p.code.selector})` })),
+      };
+    },
   };
 
   async function capabilities(): Promise<Capabilities> {
@@ -211,6 +224,52 @@ export async function startServer(opts: ServerOptions = {}) {
       broadcast({ type: 'file-change', change: { toolUseId: `token-${Date.now()}`, tool: 'Token', path: r.path, before: r.before, after: r.after } });
       return findTokens(requireProject());
     },
+    'GET /api/tokens/sync': async () => tokenReport(requireProject()),
+    'POST /api/tokens/sync/figma': async () => {
+      const cwd = requireProject();
+      let client = figma;
+      if (!client) {
+        const found = await figmaStatus(opts.figmaUrls);
+        const status = found.status;
+        client = figma = found.client;
+        if (!client) throw new HttpError(400, status.state === 'not-running' ? 'Open the Figma desktop app with its MCP server turned on (Preferences › Enable Dev Mode MCP Server), select a frame that uses your variables, then pull again.' : `Figma: ${status.detail ?? 'not reachable'}`);
+      }
+      try {
+        await pullFromFigma(cwd, client);
+      } catch (e) {
+        // A stale session (Figma restarted): reconnect once.
+        if (/session|400|fetch failed/i.test((e as Error).message)) {
+          const again = (await figmaStatus(opts.figmaUrls)).client;
+          figma = again;
+          if (!again) throw new HttpError(400, (e as Error).message);
+          await pullFromFigma(cwd, again);
+        } else throw new HttpError(400, (e as Error).message);
+      }
+      return tokenReport(cwd);
+    },
+    'POST /api/tokens/sync/import': async (body) => {
+      const cwd = requireProject();
+      await importVariables(cwd, String(body.text ?? '')).catch((e: Error) => {
+        throw new HttpError(400, e.message);
+      });
+      return tokenReport(cwd);
+    },
+    'POST /api/tokens/sync/link': async (body) => {
+      const cwd = requireProject();
+      await setLink(cwd, String(body.figma ?? ''), body.code ? String(body.code) : null);
+      return tokenReport(cwd);
+    },
+    'POST /api/tokens/sync/use-figma': async (body) => {
+      const cwd = requireProject();
+      const keys = Array.isArray(body.keys) ? body.keys.map(String) : [String(body.key ?? '')];
+      for (const key of keys) {
+        const r = await useFigmaValue(cwd, key).catch((e: Error) => {
+          throw new HttpError(400, e.message);
+        });
+        broadcast({ type: 'file-change', change: { toolUseId: `token-${Date.now()}-${key}`, tool: 'Token', path: r.path, before: r.before, after: r.after } });
+      }
+      return tokenReport(cwd);
+    },
     'GET /api/diff': async (_b, url) => diffFor(requireProject(), String(url.searchParams.get('path'))),
     'POST /api/git/latest': async () => getLatest(requireProject()),
     'POST /api/git/save': async (body) => saveVersion(requireProject(), String(body.message ?? '')),
@@ -235,7 +294,7 @@ export async function startServer(opts: ServerOptions = {}) {
     },
     'GET /api/figma/status': async (_b, url) => {
       const custom = url.searchParams.get('url');
-      const { status, client } = await figmaStatus(custom ? [custom] : undefined);
+      const { status, client } = await figmaStatus(custom ? [custom] : opts.figmaUrls);
       figma = client;
       return status;
     },

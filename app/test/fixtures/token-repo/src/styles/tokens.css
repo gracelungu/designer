@@ -1,0 +1,14 @@
+/* Design tokens */
+:root {
+  --color-primary: #2563eb;
+  --color-surface: #ffffff;
+  --color-text: rgb(17, 17, 17);
+  --color-link: var(--color-primary);
+  --space-4: 1rem;
+  --radius-card: 8px;
+  --font-body: "Inter", system-ui, sans-serif;
+  --legacy-gutter: 13px;
+}
+[data-theme="dark"] {
+  --color-surface: #0b0b0c;
+}
