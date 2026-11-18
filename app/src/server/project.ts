@@ -205,6 +205,14 @@ export async function diffFor(cwd: string, path: string) {
 // ----- Dev servers (the app itself and Storybook) -----
 
 /** First local URL a dev server prints, without trailing slash or punctuation. */
+/** An interactive prompt (inquirer/prompts style: "? Question … (Y/n)") that the dev server is waiting on. */
+export function waitingForAnswer(output: string): string | undefined {
+  // eslint-disable-next-line no-control-regex
+  const clean = output.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '');
+  const m = /^\s*\?\s+(.+?(?:\(y\/N\)|\(Y\/n\)|\(yes\/no\)|›.*))\s*$/im.exec(clean);
+  return m ? m[1].replace(/\s*›\s*$/, '').trim() : undefined;
+}
+
 export function findLocalUrl(text: string): string | undefined {
   const m = /https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\]):\d+(?:\/[^\s)'"`,]*)?/.exec(text);
   return m ? m[0].replace(/[/.]+$/, '') : undefined;
@@ -257,7 +265,9 @@ export class DevProcess {
   constructor(readonly script: string) {}
   /** Starts a dev server and resolves with the first local URL it prints. Any shell command works; the default is `npm run <script>`. */
   start(cwd: string, command?: string): Promise<string> {
-    const cmd = command?.trim() || `npm run ${this.script}`;
+    // Storybook asks yes/no questions in a terminal (e.g. "Port 6006 is not available, use 6007?"). Nobody
+    // can answer them here, so run it with --ci: it then takes the next free port and never waits for input.
+    const cmd = command?.trim() || (this.script === 'storybook' ? 'npm run storybook -- --ci' : `npm run ${this.script}`);
     if (this.proc && this.url && this.cwd === cwd && this.command === cmd) return Promise.resolve(this.url);
     if (this.adopted && this.url && this.cwd === cwd && !command) return Promise.resolve(this.url);
     this.stop();
@@ -267,12 +277,19 @@ export class DevProcess {
     return new Promise((resolveUrl, reject) => {
       const p = spawn(cmd, { cwd, shell: true, detached: process.platform !== 'win32', env: { ...process.env, BROWSER: 'none', FORCE_COLOR: '0', PYTHONUNBUFFERED: '1' } });
       this.proc = p;
-      const timer = setTimeout(() => reject(new Error(`"${cmd}" did not print a local URL within 90 seconds.\n${this.tail()}`)), 90000);
+      const timer = setTimeout(() => reject(new Error(`"${cmd}" did not print a local URL within 3 minutes.\n${this.tail()}`)), 180000);
       const onData = (d: Buffer) => {
         // eslint-disable-next-line no-control-regex
         const text = d.toString().replace(/\x1b\[[0-9;]*m/g, '');
         this.log.push(text);
         if (this.log.length > 300) this.log.shift();
+        const question = !this.url && waitingForAnswer(this.log.join(''));
+        if (question && this.proc === p) {
+          clearTimeout(timer);
+          this.stop();
+          reject(new Error(`"${cmd}" stopped to ask a question in the terminal, which Designer can't answer:\n${question}\nRun it once in a terminal to answer it, or ask Claude to change the script.`));
+          return;
+        }
         const m = findLocalUrl(text);
         if (m && !this.url && this.proc === p) {
           this.url = m;

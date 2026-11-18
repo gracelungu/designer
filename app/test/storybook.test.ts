@@ -1,7 +1,7 @@
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { describe, expect, it } from 'vitest';
-import { DevProcess, findRunningStorybook, storybookPorts } from '../src/server/project';
+import { DevProcess, findRunningStorybook, storybookPorts, waitingForAnswer } from '../src/server/project';
 
 async function fakeStorybook(importPaths: string[]) {
   const s = createServer((req, res) => {
@@ -41,5 +41,19 @@ describe('reusing a running Storybook', () => {
     d.stop();
     expect(d.url).toBeUndefined();
     expect(d.adopted).toBe(false);
+  });
+
+  it('notices a dev server waiting for a yes/no answer', () => {
+    expect(waitingForAnswer('\x1b[?25l\x1b[2K\x1b[1G? Port 6106 is not available. Would you like to run Storybook on port 6107 instead? › (Y/n)')).toBe(
+      'Port 6106 is not available. Would you like to run Storybook on port 6107 instead? › (Y/n)',
+    );
+    expect(waitingForAnswer('info => Starting manager..\nLocal: http://localhost:6006/')).toBeUndefined();
+  });
+
+  it('stops and explains instead of hanging when a command asks a question', async () => {
+    const d = new DevProcess('dev');
+    const q = `node -e "process.stdout.write('? Install missing packages? (Y/n)'); setInterval(() => {}, 1000)"`;
+    await expect(d.start(process.cwd(), q)).rejects.toThrow(/asks? a question|stopped to ask/);
+    expect(d.proc).toBeUndefined();
   });
 });

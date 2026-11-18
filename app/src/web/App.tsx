@@ -78,7 +78,13 @@ function Workspace({ status }: { status: Status }) {
   const [codeTab, setCodeTab] = useState<'tokens' | 'changes'>('changes');
   const [modal, setModal] = useState<'save' | 'share' | 'figma' | 'project' | null>(null);
   const [projectMenu, setProjectMenu] = useState(false);
-  const [toast, setToast] = useState<{ text: string; url?: string }>();
+  const [toast, setToast] = useState<{ text: string; url?: string; busy?: boolean }>();
+  // Messages that are not progress go away by themselves; errors stay a little longer.
+  useEffect(() => {
+    if (!toast || toast.busy) return;
+    const t = setTimeout(() => setToast(undefined), toast.text.length > 120 ? 20000 : 8000);
+    return () => clearTimeout(t);
+  }, [toast]);
   const [running, setRunning] = useState<{ app?: string | null; storybook?: string | null }>({});
   const [context, setContext] = useState<CanvasContext>();
   const [prefs, setPrefs] = useState<Prefs>(() => ({ model: lsGet('designer.model') ?? undefined, effort: lsGet('designer.effort') ?? undefined, mode: lsGet('designer.mode') ?? undefined }));
@@ -205,7 +211,7 @@ function Workspace({ status }: { status: Status }) {
     const entry = project?.stories.find((e) => e.stories.some((x) => x.id === storyId));
     const story = entry?.stories.find((x) => x.id === storyId);
     const title = entry ? `${entry.title.split('/').pop()}${story && entry.stories.length > 1 ? ` / ${story.name}` : ''}` : storyId;
-    if (!running.storybook) setToast({ text: 'Starting Storybook to render the component…' });
+    if (!running.storybook) setToast({ text: 'Starting your Storybook to render the component. The first start can take a minute.', busy: true });
     try {
       await host.placeStory(storyId, { title, file: entry?.file, nextToSelection: nextTo });
       setToast(undefined);
@@ -420,8 +426,9 @@ function Workspace({ status }: { status: Status }) {
       )}
       {modal === 'figma' && <FigmaImport sessionRunning={s.running} onClose={() => (setModal(null), setLeft('chat'), setChatView('chat'))} />}
       {toast && (
-        <div className="toast" onClick={() => setToast(undefined)}>
-          {toast.text}
+        <div className={`toast ${toast.busy ? 'busy' : ''}`} role="status">
+          {toast.busy && <span className="toast-spin" />}
+          <span className="toast-text">{toast.text}</span>
           {toast.url && (
             <>
               {' '}
@@ -430,6 +437,9 @@ function Workspace({ status }: { status: Status }) {
               </a>
             </>
           )}
+          <button className="toast-close" aria-label="Dismiss" onClick={() => setToast(undefined)}>
+            ×
+          </button>
         </div>
       )}
     </div>
