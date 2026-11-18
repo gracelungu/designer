@@ -16,6 +16,9 @@ const { url, close } = await startServer({
   staticDir: join(here, '..', 'web'),
   token: process.env.DESIGNER_TOKEN,
   initialProject: flag('project') ? resolve(flag('project')!) : undefined,
+  workspace: process.env.DESIGNER_WORKSPACE || undefined,
+  // dist/server -> app/demo
+  demoDir: join(here, '..', '..', 'demo'),
 });
 console.log(`Designer is running at ${url}`);
 if (!args.includes('--no-open')) execFile(process.platform === 'darwin' ? 'open' : 'xdg-open', [url], () => undefined);

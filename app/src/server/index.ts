@@ -16,6 +16,8 @@ import { AutoSetup } from './autosetup.js';
 import { planProject } from './setup.js';
 import { handleMcp, SYSTEM_PROMPT, type ToolHost } from './mcp.js';
 import { FigmaClient, figmaStatus, parseOutline } from './figma.js';
+import { demoAvailable, installDemo } from './demo.js';
+import { readSettings, writeSettings, type Settings } from './settings.js';
 import type { Capabilities, CanvasOp, CanvasState, ClaudeInstall, ClientMessage, ServerMessage } from '../shared/protocol.js';
 
 export interface ServerOptions {
@@ -33,6 +35,8 @@ export interface ServerOptions {
   autoSetup?: boolean;
   /** Replaces dependency installation (tests). */
   install?: (command: string, cwd: string) => Promise<void>;
+  /** The bundled demo project to copy from, if this build ships one. */
+  demoDir?: string;
 }
 
 /** Only answer requests addressed to loopback, which blocks DNS-rebinding pages. */
@@ -217,7 +221,21 @@ export async function startServer(opts: ServerOptions = {}) {
   }
 
   const routes: Record<string, (body: Record<string, unknown>, url: URL) => Promise<unknown>> = {
-    'GET /api/status': async () => ({ claude, project: projectPath ?? null, home: homedir(), workspace, platform: process.platform }),
+    'GET /api/status': async () => {
+      const settings = await readSettings(workspace);
+      return { claude, project: projectPath ?? null, home: homedir(), workspace, platform: process.platform, onboarded: !!settings.onboardedAt, demo: await demoAvailable(opts.demoDir) };
+    },
+    'POST /api/onboarding': async (body) => {
+      const startedWith = ['demo', 'project', 'blank'].includes(String(body.startedWith)) ? (String(body.startedWith) as Settings['startedWith']) : undefined;
+      return writeSettings(workspace, { onboardedAt: new Date().toISOString(), startedWith });
+    },
+    'POST /api/onboarding/reset': async () => writeSettings(workspace, { onboardedAt: undefined, startedWith: undefined }),
+    'POST /api/demo': async (body) => {
+      if (!opts.demoDir) throw new HttpError(404, 'The demo project is not bundled with this copy of Designer.');
+      const { path, created } = await installDemo(opts.demoDir, workspace, { fresh: body.fresh === true });
+      const info = await openProject(path);
+      return { ...info, created };
+    },
     'POST /api/claude/recheck': async () => {
       claude = await detectClaude();
       return claude;

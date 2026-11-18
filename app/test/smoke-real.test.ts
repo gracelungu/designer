@@ -1,7 +1,7 @@
 // Real-world smoke test: scaffolds small apps for several frameworks, then lets Designer install them
 // from the npm registry with their own package manager and start their real dev servers.
 // Needs the network and takes a few minutes, so it only runs with DESIGNER_SMOKE_REAL=1
-// (npm run test:smoke).
+// (npm run test:smoke:setup).
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';

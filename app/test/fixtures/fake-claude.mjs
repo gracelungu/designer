@@ -2,7 +2,7 @@
 // A stand-in for the `claude` CLI that speaks the same stream-json control protocol.
 // CI has no signed-in Claude Code, so tests drive this instead.
 import { createInterface } from 'node:readline';
-import { writeFileSync, readFileSync } from 'node:fs';
+import { existsSync, writeFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const args = process.argv.slice(2);
@@ -41,6 +41,7 @@ createInterface({ input: process.stdin }).on('line', async (line) => {
     out({ type: 'stream_event', parent_tool_use_id: null, event: { type: 'content_block_start', index: 0, content_block: { type: 'text' } } });
     out({ type: 'stream_event', parent_tool_use_id: null, event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'Editing ' } } });
     const file = join(process.cwd(), 'hello.txt');
+    if (!existsSync(file)) writeFileSync(file, 'hello world\n');
     const input = { file_path: file, old_string: 'hello', new_string: text };
     out({ type: 'assistant', parent_tool_use_id: null, message: { id: 'msg1', content: [{ type: 'text', text: 'Editing now' }, { type: 'tool_use', id: 'tool1', name: 'Edit', input }] } });
     const perm = await ask({ subtype: 'can_use_tool', tool_name: 'Edit', input, tool_use_id: 'tool1' });
