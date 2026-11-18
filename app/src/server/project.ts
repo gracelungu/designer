@@ -205,22 +205,71 @@ export async function diffFor(cwd: string, path: string) {
 // ----- Dev servers (the app itself and Storybook) -----
 
 /** First local URL a dev server prints, without trailing slash or punctuation. */
+/** An interactive prompt (inquirer/prompts style: "? Question … (Y/n)") that the dev server is waiting on. */
+export function waitingForAnswer(output: string): string | undefined {
+  // eslint-disable-next-line no-control-regex
+  const clean = output.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '');
+  const m = /^\s*\?\s+(.+?(?:\(y\/N\)|\(Y\/n\)|\(yes\/no\)|›.*))\s*$/im.exec(clean);
+  return m ? m[1].replace(/\s*›\s*$/, '').trim() : undefined;
+}
+
 export function findLocalUrl(text: string): string | undefined {
   const m = /https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\]):\d+(?:\/[^\s)'"`,]*)?/.exec(text);
   return m ? m[0].replace(/[/.]+$/, '') : undefined;
 }
 
+/** Ports a Storybook for this project might already be on: the one in its script, then Storybook's defaults. */
+export function storybookPorts(script?: string): number[] {
+  const m = script ? /(?:-p|--port)[\s=]+(\d{2,5})/.exec(script) : null;
+  return [...new Set([...(m ? [Number(m[1])] : []), 6006, 6007, 6008, 6009])];
+}
+
+/**
+ * Finds a Storybook that is already running for this project (say, in the user's own terminal),
+ * so Designer can use it instead of starting a second copy. It only counts as this project's
+ * when its story index lists story files that this project has.
+ */
+export async function findRunningStorybook(projectFiles: string[], script?: string, hosts = ['127.0.0.1', 'localhost']): Promise<string | undefined> {
+  const norm = (f: string) => f.replace(/\\/g, '/').replace(/^\.\//, '');
+  const mine = projectFiles.map(norm);
+  if (!mine.length) return undefined;
+  const ours = (importPath: string) => {
+    const p = norm(importPath);
+    return mine.some((f) => f === p || f.endsWith(`/${p}`) || p.endsWith(`/${f}`));
+  };
+  for (const port of storybookPorts(script)) {
+    for (const host of hosts) {
+      const base = `http://${host}:${port}`;
+      try {
+        const r = await fetch(`${base}/index.json`, { signal: AbortSignal.timeout(1200) });
+        if (!r.ok) continue;
+        const idx = (await r.json()) as { entries?: Record<string, { importPath?: string }> };
+        if (Object.values(idx.entries ?? {}).some((e) => e.importPath && ours(e.importPath))) return base;
+        break; // a Storybook, but another project's
+      } catch {
+        // nothing on this host and port
+      }
+    }
+  }
+  return undefined;
+}
+
 export class DevProcess {
   proc?: ChildProcess;
   url?: string;
+  /** Set when the server was already running (started outside Designer): we use it and never stop it. */
+  adopted = false;
   command?: string;
   cwd?: string;
   log: string[] = [];
   constructor(readonly script: string) {}
   /** Starts a dev server and resolves with the first local URL it prints. Any shell command works; the default is `npm run <script>`. */
   start(cwd: string, command?: string): Promise<string> {
-    const cmd = command?.trim() || `npm run ${this.script}`;
+    // Storybook asks yes/no questions in a terminal (e.g. "Port 6006 is not available, use 6007?"). Nobody
+    // can answer them here, so run it with --ci: it then takes the next free port and never waits for input.
+    const cmd = command?.trim() || (this.script === 'storybook' ? 'npm run storybook -- --ci' : `npm run ${this.script}`);
     if (this.proc && this.url && this.cwd === cwd && this.command === cmd) return Promise.resolve(this.url);
+    if (this.adopted && this.url && this.cwd === cwd && !command) return Promise.resolve(this.url);
     this.stop();
     this.command = cmd;
     this.cwd = cwd;
@@ -228,12 +277,19 @@ export class DevProcess {
     return new Promise((resolveUrl, reject) => {
       const p = spawn(cmd, { cwd, shell: true, detached: process.platform !== 'win32', env: { ...process.env, BROWSER: 'none', FORCE_COLOR: '0', PYTHONUNBUFFERED: '1' } });
       this.proc = p;
-      const timer = setTimeout(() => reject(new Error(`"${cmd}" did not print a local URL within 90 seconds.\n${this.tail()}`)), 90000);
+      const timer = setTimeout(() => reject(new Error(`"${cmd}" did not print a local URL within 3 minutes.\n${this.tail()}`)), 180000);
       const onData = (d: Buffer) => {
         // eslint-disable-next-line no-control-regex
         const text = d.toString().replace(/\x1b\[[0-9;]*m/g, '');
         this.log.push(text);
         if (this.log.length > 300) this.log.shift();
+        const question = !this.url && waitingForAnswer(this.log.join(''));
+        if (question && this.proc === p) {
+          clearTimeout(timer);
+          this.stop();
+          reject(new Error(`"${cmd}" stopped to ask a question in the terminal, which Designer can't answer:\n${question}\nRun it once in a terminal to answer it, or ask Claude to change the script.`));
+          return;
+        }
         const m = findLocalUrl(text);
         if (m && !this.url && this.proc === p) {
           this.url = m;
@@ -255,10 +311,18 @@ export class DevProcess {
   tail(lines = 12) {
     return this.log.join('').split('\n').slice(-lines).join('\n');
   }
+  /** Use a server that is already running (not ours to stop). */
+  adopt(cwd: string, url: string) {
+    this.stop();
+    this.cwd = cwd;
+    this.url = url;
+    this.adopted = true;
+  }
   stop() {
     const p = this.proc;
     this.proc = undefined;
     this.url = undefined;
+    this.adopted = false;
     if (!p) return;
     try {
       // Dev servers start children of their own; stop the whole group.
