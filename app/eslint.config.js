@@ -12,8 +12,8 @@ export default tseslint.config(
     rules: { 'react-hooks/rules-of-hooks': 'error', 'react-hooks/exhaustive-deps': 'warn' },
   },
   {
-    files: ['test/fixtures/**/*.mjs'],
-    languageOptions: { globals: { process: 'readonly', console: 'readonly' } },
+    files: ['test/fixtures/**/*.mjs', 'test/smoke/**/*.mjs'],
+    languageOptions: { globals: { process: 'readonly', console: 'readonly', setTimeout: 'readonly', fetch: 'readonly' } },
   },
   {
     files: ['electron/**/*.cjs'],

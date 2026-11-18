@@ -42,6 +42,24 @@ The chat works through the CLI's own controls:
 - **Figma | Code properties.** The right panel switches between design properties (plus the rendered styles of a code layer, in Figma terms) and code properties (component props, size, a JSX snippet, or the CSS and code link of a design layer).
 - The canvas is saved to `<project>/.designer/canvas.json`, or `~/Designer/canvas.json` with no project.
 
+## Working with the team
+
+- **Comments on the canvas.** Press C and click a frame to pin a comment; it follows the frame when it moves. Each thread is saved as its own file in `<project>/.designer/comments/<id>.json`, signed with your git `user.name`, so comments travel with Save version, merge cleanly when two people comment at once, and appear for everyone after Get latest. The **Comments** tab lists them; **Fix with Claude** hands one to Claude, which can read comments (`get_comments`) and reply or resolve them (`reply_to_comment`) through Designer's MCP server.
+- **A design preview for developers.** *Export design preview* (project menu) writes `.designer/preview/`: one SVG per top-level frame, a `README.md` that GitHub and Azure DevOps render with the frames, comments and linked components, and a self-contained `index.html` with comment pins and CSS (also downloaded). **Share for review** includes it by default: it commits the preview and comments, pushes the branch, and puts the preview link in the pull request.
+- **Pull requests and their comments.** The **Comments › Pull requests** view lists open pull requests for the project's remote and lets you read, reply to and (on Azure DevOps) resolve their comment threads.
+  - **Azure DevOps** remotes (`dev.azure.com`, `ssh.dev.azure.com`, `*.visualstudio.com`) go through Microsoft's Azure DevOps MCP server, started locally as `npx -y @azure-devops/mcp <organization>`. It signs in with your Microsoft account the first time; Designer holds no token. Claude Code gets the same server, so it can work with PRs from the chat. Set `DESIGNER_AZURE_MCP` to a JSON array (such as `["node","/path/server.js"]`) to run a different command; the organization is appended.
+  - **GitHub** remotes use the GitHub CLI with your own `gh auth login`.
+
+## Tests
+
+```bash
+npm test                         # unit and server tests (vitest)
+npm run build && npm run smoke   # the collaboration features in a real browser (Playwright)
+node ../editor/tests/e2e.cjs     # the canvas editor
+```
+
+Claude Code and the Azure DevOps MCP server are replaced by stand-ins in `test/fixtures/`, so the tests need neither a sign-in nor network.
+
 ## Run it as a local server
 
 You need Node 20 or newer, and Claude Code installed and signed in.

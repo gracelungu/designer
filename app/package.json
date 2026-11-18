@@ -26,7 +26,8 @@
     "dist:mac": "npm run build && electron-builder --mac --publish never",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
-    "test": "vitest run"
+    "test": "vitest run",
+    "smoke": "node test/smoke/collab.smoke.mjs"
   },
   "dependencies": {
     "ws": "^8.23.0"
