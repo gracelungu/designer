@@ -7,7 +7,7 @@ export * as commands from './core/commands.js';
 export { Toolbar } from './ui/toolbar.js';
 export { LayersPanel } from './ui/layers.js';
 export { PropertiesPanel } from './ui/properties.js';
-export { bindShortcuts, SHORTCUTS } from './ui/shortcuts.js';
+export { bindShortcuts, SHORTCUTS, showShortcutSheet } from './ui/shortcuts.js';
 export { showMenu, toast, download } from './ui/dom.js';
 export { cssFor } from './ui/inspect.js';
 export { exportSVG } from './render/scene.js';

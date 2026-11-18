@@ -8,6 +8,7 @@ import { FRAME_PRESETS, FONTS, WEIGHTS, solid, stroke, shadow, isLine, isFrameLi
 import { hasRadius } from '../core/paths.js';
 import { setBox } from '../core/transform.js';
 import { defaultLayout } from '../core/layout.js';
+import { rasterize } from '../render/raster.js';
 import { exportSVG } from '../render/scene.js';
 import { cssFor } from './inspect.js';
 
@@ -67,9 +68,9 @@ export class PropertiesPanel {
     return JSON.stringify([
       this.tab, s.tool === 'frame' ? 'frame' : '', s.selection, this.ui,
       this.nodes().map((n) => [
-        n.type, (n.fills || []).map((f) => f.type), (n.strokes || []).length, (n.effects || []).map((e) => e.type),
+        n.type, (n.fills || []).map((f) => [f.type, f.stops?.length]), (n.strokes || []).length, (n.effects || []).map((e) => e.type),
         n.layout ? [n.layout.mode, n.layout.primary === 'space-between'] : null, !!n.radii, n.parent && s.get(n.parent)?.layout ? 1 : 0,
-        n.parent ? s.get(n.parent)?.type : null, n.absolute, n.sizing, n.text && n.text.autoResize,
+        n.parent ? s.get(n.parent)?.type : null, n.absolute, n.sizing, n.layout?.mode, n.layout?.wrap, n.text && n.text.autoResize,
       ]),
       same(this.nodes().map((n) => n.fills)), same(this.nodes().map((n) => n.strokes)), same(this.nodes().map((n) => n.effects)),
     ]);
@@ -513,6 +514,15 @@ export class PropertiesPanel {
       [h('button', { class: 'dz-icon-btn', title: 'Remove auto layout (Alt+Shift+A)', 'aria-label': 'Remove auto layout', html: ICONS.minus, onclick: () => C.removeAutoLayout(store) })],
       h('div', { class: 'dz-al' }, h('div', { class: 'dz-al-left' }, dir, h('div', { class: 'dz-gap-row' }, gap, autoGap)), grid),
       h('div', { class: 'dz-pad-row' }, pad, padToggle),
+      ...(L().mode === 'horizontal' ? [
+        h('label', { class: 'dz-pad' },
+          h('input', { type: 'checkbox', checked: !!L().wrap, onchange: (event) => store.transact(() => {
+            L().wrap = event.target.checked;
+            if (L().wrap && f.sizing.h === 'hug') f.sizing.h = 'fixed';
+          }) }), 'Wrap'),
+        ...(L().wrap ? [this.num({ label: 'Row', title: 'Gap between rows', min: 0, targets: () => [L()],
+          getOne: (l) => l.rowGap ?? l.gap, setOne: (l, value) => { l.rowGap = value; } })] : []),
+      ] : []),
     );
   }
 
@@ -642,6 +652,27 @@ export class PropertiesPanel {
         opacity: () => get('opacity'), setOpacity: (o) => set('opacity', o),
       });
     }
+    const gradient = p.type === 'linear' || p.type === 'radial';
+    const paintType = key === 'fills' && all().every((n) => n.type !== 'text')
+      ? this.select([{ value: 'solid', label: 'Solid' }, { value: 'linear', label: 'Linear' }, { value: 'radial', label: 'Radial' }, { value: 'image', label: 'Image', disabled: p.type !== 'image' }], {
+        title: 'Fill type', get: () => get('type'), set: (type) => all().forEach((n) => {
+          const previous = paint(n);
+          const color = previous.color ?? previous.stops?.[0]?.color ?? '#D9D9D9';
+          n[key][i] = { type, color, opacity: previous.opacity, visible: previous.visible,
+            ...(type !== 'solid' ? { angle: previous.angle ?? 0, stops: previous.stops ?? [{ offset: 0, color }, { offset: 1, color: '#FFFFFF' }] } : {}) };
+        }),
+      }) : null;
+    if (gradient) {
+      const stops = p.stops ?? [];
+      main = h('div', { class: 'dz-fx-params' }, ...(p.type === 'linear' ? [
+        this.num({ label: 'Angle', title: 'Gradient angle', targets: () => all().map(paint), getOne: (f) => f.angle, setOne: (f, v) => { f.angle = v; } }),
+      ] : []), ...stops.map((stop, index) => h('div', { class: 'dz-row-btns' },
+        h('input', { type: 'color', value: stop.color, 'aria-label': `Stop ${index + 1} color`, onchange: (e) => store.transact(() => all().forEach((n) => { paint(n).stops[index].color = e.target.value; })) }),
+        this.num({ label: '%', title: `Stop ${index + 1} position`, min: 0, max: 100, targets: () => all().map(paint),
+          getOne: (f) => Math.round(f.stops[index].offset * 100), setOne: (f, v) => { f.stops[index].offset = v / 100; } }),
+        h('button', { class: 'dz-btn', disabled: stops.length <= 2, 'aria-label': `Remove stop ${index + 1}`, onclick: () => store.transact(() => all().forEach((n) => paint(n).stops.splice(index, 1))) }, '−'),
+      )), h('button', { class: 'dz-btn', onclick: () => store.transact(() => all().forEach((n) => paint(n).stops.push({ offset: 0.5, color: '#808080' }))) }, 'Add stop'));
+    }
     const typeSel = key === 'fills' ? h('button', {
       class: 'dz-icon-btn' + (p.type === 'image' ? ' on' : ''), title: p.type === 'image' ? 'Use a solid colour' : 'Use an image', 'aria-label': 'Toggle image fill', html: ICONS.image,
       onclick: () => {
@@ -649,7 +680,7 @@ export class PropertiesPanel {
         this.chooseImage((id) => store.transact(() => all().forEach((n) => { n.fills[i] = { type: 'image', asset: id, fit: 'fill', opacity: 1, visible: true }; })));
       },
     }) : null;
-    return h('div', { class: 'dz-paint' + (p.visible === false ? ' off' : '') }, h('div', { class: 'dz-paint-main' }, main), typeSel, eye, del);
+    return h('div', { class: 'dz-paint' + (p.visible === false ? ' off' : '') }, h('div', { class: 'dz-paint-main' }, paintType, main), typeSel, eye, del);
   }
 
   chooseImage(cb) {
@@ -699,11 +730,40 @@ export class PropertiesPanel {
     const store = this.store;
     const ids = nodes.map((n) => n.id);
     const name = nodes.length === 1 ? nodes[0].name : 'Selection';
-    return this.section('Export', null, h('div', { class: 'dz-row-btns' },
-      h('button', { class: 'dz-btn', onclick: () => download(`${name}.svg`, exportSVG(store, ids)) }, 'Export SVG'),
-      h('button', { class: 'dz-btn', onclick: async () => {
-        try { await navigator.clipboard.writeText(exportSVG(store, ids)); toast('Copied as SVG'); } catch { toast('Copy is blocked here. Use Export SVG.'); }
-      } }, 'Copy as SVG')));
+    const scale = h('select', { class: 'dz-select', 'aria-label': 'Export scale' }, ...[1, 2, 3, 4].map((n) => h('option', { value: n }, `${n}×`)));
+    const format = h('select', { class: 'dz-select', 'aria-label': 'Export format' },
+      h('option', { value: 'svg' }, 'SVG'), h('option', { value: 'png' }, 'PNG'), h('option', { value: 'jpg' }, 'JPG'));
+    const raster = async (type, factor) => {
+      const containsLive = ids.some((id) => [id, ...store.descendants(id)].some((child) => store.get(child)?.type === 'code'));
+      if (containsLive) throw new Error('Export live code frames from Changes using a captured image.');
+      const blob = await rasterize(exportSVG(store, ids), type, factor);
+      return blob;
+    };
+    const run = async (action) => {
+      try { await action(); } catch (error) { toast(error.message); }
+    };
+    format.onchange = () => { scale.disabled = format.value === 'svg'; };
+    scale.disabled = true;
+    return this.section('Export', null, h('div', { class: 'dz-row-btns' }, scale, format,
+      h('button', { class: 'dz-btn', onclick: () => void run(async () => {
+        const ext = format.value;
+        if (ext === 'svg') download(`${name}.svg`, exportSVG(store, ids));
+        else {
+          const type = ext === 'png' ? 'image/png' : 'image/jpeg';
+          const factor = Number(scale.value);
+          const blob = await raster(type, factor);
+          download(`${name}${factor > 1 ? '@' + factor + 'x' : ''}.${ext}`, blob, type);
+        }
+      }) }, 'Export')),
+      h('div', { class: 'dz-row-btns' },
+        h('button', { class: 'dz-btn', onclick: () => void run(async () => {
+          await navigator.clipboard.writeText(exportSVG(store, ids));
+          toast('Copied as SVG');
+        }) }, 'Copy as SVG'),
+        h('button', { class: 'dz-btn', onclick: () => void run(async () => {
+          await navigator.clipboard.write([new ClipboardItem({ 'image/png': raster('image/png', 1) })]);
+          toast('Copied as PNG');
+        }) }, 'Copy as PNG')));
   }
 
   // ---------- Inspect tab ----------

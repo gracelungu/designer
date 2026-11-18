@@ -1,6 +1,6 @@
 // Creates the canvas editor once, with its toolbar, layers and properties panels, so React can
 // place those panels in the app's own sidebars without remounting them.
-import { bindShortcuts, cssFor, emptyDoc, Editor, exportSVG, LayersPanel, PropertiesPanel, Toolbar, type EditorNode } from '../../../../editor/src/index.js';
+import { bindShortcuts, showShortcutSheet, toast, cssFor, emptyDoc, Editor, exportSVG, LayersPanel, PropertiesPanel, Toolbar, type EditorNode } from '../../../../editor/src/index.js';
 import type { CanvasComment, CanvasOp, PreviewFrame } from '../../shared/protocol';
 import { api } from '../api';
 import { buildNodes, canvasState, freeSpot, placeAt, selectionContext, storyIds, applySimple } from './convert';
@@ -12,6 +12,7 @@ export interface CanvasHost {
   propsEl: HTMLDivElement;
   /** Loads the canvas saved for the open project (or Designer's own folder). */
   load(): Promise<void>;
+  flush(): Promise<void>;
   apply(op: CanvasOp): Promise<unknown>;
   placeStory(storyId: string, opts?: { nextToSelection?: boolean; title?: string; file?: string; args?: Record<string, unknown> }): Promise<string>;
   showPage(url: string, name?: string): Promise<string>;
@@ -48,13 +49,45 @@ export function canvasHost(onAskAI: () => void): CanvasHost {
   const layers = new LayersPanel(editor, layersEl);
   new PropertiesPanel(editor, propsEl, { layers });
   new Toolbar(editor, toolbarEl, { onAskAI });
-  bindShortcuts(editor, { layers, onAskAI });
+  editor.showShortcuts = () => showShortcutSheet(editor, true);
+  bindShortcuts(editor, {
+    layers, onAskAI, onShortcuts: editor.showShortcuts,
+    onNavigate: (action) => window.dispatchEvent(new CustomEvent('designer:navigate', { detail: action })),
+    onSave: () => { void saveCanvas().then(() => toast('Canvas saved'), (error: Error) => toast(error.message)); },
+  });
 
   // Save the canvas next to the project (in .designer/canvas.json), so it travels with the repo.
   // Comments are saved on their own, one file per thread, as soon as they change.
   let saveTimer: ReturnType<typeof setTimeout> | undefined;
   let loading = false;
   let savedComments = '[]';
+  let viewKey = '';
+  let activePage = store.pageId();
+  const views = new Map<string, typeof store.view>();
+  let saving = Promise.resolve<unknown>(undefined);
+  const saveCanvas = async () => {
+    clearTimeout(saveTimer);
+    if (loading) throw new Error('Wait for the canvas to open before saving.');
+    const data = structuredClone({ version: 1, doc: store.doc, assets: store.assets });
+    saving = saving.catch(() => undefined).then(() => api('/api/canvas', { data }));
+    await saving;
+  };
+  store.on((changes) => {
+    if (loading) return;
+    if (changes.has('page') || activePage !== store.pageId()) {
+      views.set(activePage, { ...store.view });
+      activePage = store.pageId();
+      Object.assign(store.view, views.get(activePage) ?? { x: 0, y: 0, zoom: 1 });
+      editor.code.interact(null);
+      editor.comments.closeDraft();
+      editor.comments.render();
+      store.emit('view');
+    }
+    if (viewKey && (changes.has('page') || changes.has('view'))) {
+      views.set(activePage, { ...store.view });
+      try { localStorage.setItem(viewKey, JSON.stringify({ activePage, views: Object.fromEntries(views) })); } catch { /* unavailable storage */ }
+    }
+  });
   store.on((ch) => {
     if (!ch.has('commit') || loading) return;
     const comments = JSON.stringify(store.doc.comments ?? []);
@@ -63,7 +96,7 @@ export function canvasHost(onAskAI: () => void): CanvasHost {
       void api('/api/comments', { comments: store.doc.comments ?? [] }).catch(() => undefined);
     }
     clearTimeout(saveTimer);
-    saveTimer = setTimeout(() => void api('/api/canvas', { data: { version: 1, doc: store.doc, assets: store.assets } }).catch(() => undefined), 600);
+    saveTimer = setTimeout(() => void saveCanvas().catch((error: Error) => toast(error.message)), 250);
   });
 
   const storySrc = async (ids: Iterable<string>) => {
@@ -86,27 +119,36 @@ export function canvasHost(onAskAI: () => void): CanvasHost {
     stage,
     layersEl,
     propsEl,
+    flush: saveCanvas,
     async load() {
       clearTimeout(saveTimer);
       loading = true;
       try {
-        const r = await api<{ data: { doc?: { comments?: unknown[] }; assets?: Record<string, string> } | null; comments?: CanvasComment[]; author?: string }>('/api/canvas').catch(() => ({ data: null, comments: [] as CanvasComment[], author: undefined }));
+        const r = await api<{ data: { doc?: { comments?: unknown[] }; assets?: Record<string, string> } | null; path?: string; comments?: CanvasComment[]; author?: string }>('/api/canvas').catch(() => ({ data: null, comments: [] as CanvasComment[], author: undefined, path: undefined }));
         const data = r.data;
         if (data && data.doc) store.load(data.doc, data.assets ?? {});
         else store.load(emptyDoc(), {});
         store.doc.comments = r.comments ?? [];
         savedComments = JSON.stringify(store.doc.comments);
         if (r.author) editor.comments.author = r.author;
-        store.view.x = 0;
-        store.view.y = 0;
-        store.view.zoom = 1;
+        viewKey = r.path ? `designer.canvas-view:${r.path}` : '';
+        views.clear();
+        try {
+          const saved = JSON.parse(localStorage.getItem(viewKey) ?? 'null') as { activePage: string; views: Record<string, typeof store.view> } | null;
+          if (saved) {
+            for (const [id, view] of Object.entries(saved.views)) views.set(id, view);
+            store.switchPage(saved.activePage);
+          }
+        } catch { /* ignore unavailable or invalid saved preferences */ }
+        activePage = store.pageId();
+        Object.assign(store.view, views.get(activePage) ?? { x: 0, y: 0, zoom: 1 });
         // Live renders get fresh addresses each run; drop stale ones until they're shown again.
-        for (const id of store.allIds()) {
+        for (const id of Object.keys(store.doc.nodes)) {
           const n = store.get(id);
           if (n?.type === 'code' && n.code) n.code.src = null;
         }
         store.emit('doc');
-        requestAnimationFrame(() => (store.doc.root.length ? editor.zoomToFit() : undefined));
+        if (!views.has(activePage) && store.doc.root.length) requestAnimationFrame(() => editor.zoomToFit());
       } finally {
         setTimeout(() => (loading = false), 50);
       }
@@ -197,7 +239,7 @@ export function canvasHost(onAskAI: () => void): CanvasHost {
       store.emit('comments');
     },
     previewFrames() {
-      const tops = store.doc.root.map((id) => store.get(id)!).filter((n) => n && n.visible !== false && ['frame', 'code', 'group', 'component', 'instance'].includes(n.type));
+      const tops = store.pages().flatMap((page) => page.id === store.doc.page.id ? store.doc.root : page.root ?? []).map((id) => store.get(id)!).filter((n) => n && n.visible !== false && ['frame', 'code', 'group', 'component', 'instance'].includes(n.type));
       const comments = (store.doc.comments ?? []) as CanvasComment[];
       const inside = (id: string, top: string): boolean => {
         for (let n = store.get(id); n; n = n.parent ? store.get(n.parent) : undefined) if (n.id === top) return true;
@@ -215,6 +257,7 @@ export function canvasHost(onAskAI: () => void): CanvasHost {
         };
         walk(n.id);
         const pins = comments
+          .filter((c) => editor.comments.pageFor(c) === store.pageForNode(n.id))
           .map((c) => ({ c, a: editor.comments.anchor(c) }))
           .filter(({ c, a }) => (c.nodeId && store.get(c.nodeId) ? inside(c.nodeId, n.id) : a.x >= box.x && a.y >= box.y && a.x <= box.x + box.w && a.y <= box.y + box.h))
           .map(({ c, a }) => ({ id: c.id, x: Math.round(a.x - box.x), y: Math.round(a.y - box.y) }));
@@ -269,7 +312,7 @@ export function canvasHost(onAskAI: () => void): CanvasHost {
 /** Live renders saved in the canvas get their address again once Storybook or the app is running. */
 export async function reconnectLive(h: CanvasHost, running: { storybook?: string | null; app?: string | null }) {
   const store = h.editor.store;
-  for (const id of store.allIds()) {
+  for (const id of Object.keys(store.doc.nodes)) {
     const n = store.get(id);
     if (n?.type !== 'code' || !n.code || n.code.src) continue;
     try {

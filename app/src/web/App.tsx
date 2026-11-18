@@ -19,8 +19,10 @@ import { UpdatePill } from './components/UpdatePill';
 import { SyncBar, SyncPanel } from './components/SyncPanel';
 import { SyncController } from './sync/controller';
 import { CommentsPanel } from './components/CommentsPanel';
-import { download } from '../../../editor/src/index.js';
+import { commands, download } from '../../../editor/src/index.js';
 import { ReviewViewer, SendForReview, VisualChanges } from './components/VisualReview';
+import { QuickActions } from './components/QuickActions';
+import { FilePanel } from './components/FilePanel';
 import { VersionsPanel } from './components/Versions';
 
 interface Status {
@@ -59,14 +61,13 @@ export function App() {
         }}
       />
     );
-  if (!status.claude.found || !status.claude.loggedIn) return <ClaudeSetup status={status} onRecheck={(c) => setStatus({ ...status, claude: c })} />;
-  return <Workspace status={status} start={start} />;
+  return <Workspace status={status} start={start} onRecheck={(c) => setStatus((previous) => previous ? { ...previous, claude: c } : previous)} />;
 }
 
 function ClaudeSetup({ status, onRecheck }: { status: Status; onRecheck: (c: ClaudeInstall) => void }) {
   const c = status.claude;
   return (
-    <div className="welcome">
+    <div className="agent-setup">
       <div className="card">
         <Logo />
         <h2 style={{ marginTop: 10 }}>{!c.found ? 'Claude Code is not installed' : 'Sign in to Claude Code'}</h2>
@@ -92,19 +93,21 @@ function ClaudeSetup({ status, onRecheck }: { status: Status; onRecheck: (c: Cla
 type LeftTab = 'chat' | 'layers' | 'components' | 'comments' | 'versions';
 type ChatView = 'chat' | 'history' | 'claude';
 
-function Workspace({ status, start }: { status: Status; start?: StartChoice }) {
+function Workspace({ status, start, onRecheck }: { status: Status; start?: StartChoice; onRecheck: (c: ClaudeInstall) => void }) {
   const [chat, dispatch] = useReducer(chatReducer, initialChat);
   const [project, setProject] = useState<ProjectInfo | null>(null);
   const [setup, setSetup] = useState<SetupState | null>(null);
   const [caps, setCaps] = useState<Capabilities>();
   const [capsError, setCapsError] = useState('');
-  const [left, setLeft] = useState<LeftTab>('chat');
+  const [left, setLeft] = useState<LeftTab>('layers');
   const [chatView, setChatView] = useState<ChatView>('chat');
   const [side, setSide] = useState<'figma' | 'code'>('figma');
   const [codeTab, setCodeTab] = useState<'layer' | 'tokens' | 'changes'>('changes');
   const tokens = useTokenReport();
   const drift = tokens.report?.summary.drift ?? 0;
   const [modal, setModal] = useState<'save' | 'share' | 'figma' | 'project' | null>(null);
+  const [workspaceReady, setWorkspaceReady] = useState(false);
+  const [actionsOpen, setActionsOpen] = useState(false);
   const [projectMenu, setProjectMenu] = useState(false);
   const [reviews, setReviews] = useState<VisualReview[]>([]);
   const [viewing, setViewing] = useState<VisualReview>();
@@ -218,13 +221,44 @@ function Workspace({ status, start }: { status: Status; start?: StartChoice }) {
       void api<VisualReview[]>('/api/visual-reviews').then(setReviews, () => undefined);
       const r = await api<{ app: string | null; storybook: string | null }>('/api/run').catch(() => ({ app: null, storybook: null }));
       setRunning(r);
-      socket.send({ type: 'start', model: prefs.model, effort: prefs.effort, mode: prefs.mode });
-      setTimeout(() => void loadCaps(), 400);
+      setWorkspaceReady(true);
+
     })();
     return () => {
       off();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const agentReady = status.claude.found && status.claude.loggedIn;
+  const agentStarted = useRef(false);
+  useEffect(() => {
+    if (!workspaceReady || !agentReady || agentStarted.current) return;
+    agentStarted.current = true;
+    socket.send({ type: 'start', model: prefs.model, effort: prefs.effort, mode: prefs.mode });
+    setTimeout(() => void loadCaps(), 400);
+  }, [workspaceReady, agentReady, prefs, loadCaps]);
+
+  useEffect(() => {
+    const agent = () => { setLeft('chat'); setChatView('chat'); };
+    const navigate = (event: Event) => {
+      const action = (event as CustomEvent<string>).detail;
+      if (action !== 'focus') document.querySelector('.body')?.classList.remove('canvas-only');
+      if (action === 'inspect') setSide((side) => side === 'code' ? 'figma' : 'code');
+      else if (action === 'actions') setActionsOpen(true);
+      else if (action === 'focus') document.querySelector('.body')?.classList.toggle('canvas-only');
+      else if (action === 'assets') setLeft('components');
+      else if (action === 'file' || action === 'find') {
+        setLeft('layers');
+        if (action === 'find') requestAnimationFrame(() => document.getElementById('designer-find-layers')?.focus());
+      }
+    };
+    window.addEventListener('designer:focus-chat', agent);
+    window.addEventListener('designer:navigate', navigate);
+    return () => {
+      window.removeEventListener('designer:focus-chat', agent);
+      window.removeEventListener('designer:navigate', navigate);
+    };
   }, []);
 
   // Live renders come back when their server is running again.
@@ -277,6 +311,7 @@ function Workspace({ status, start }: { status: Status; start?: StartChoice }) {
 
   const gitAction = async (path: string, body: unknown) => {
     try {
+      await host.flush();
       const r = await api<{ ok: boolean; message: string; url?: string; files?: string[] }>(path, body);
       setToast({ text: r.message, url: r.url });
       await refreshProject();
@@ -290,6 +325,7 @@ function Workspace({ status, start }: { status: Status; start?: StartChoice }) {
 
   /** Writes the shareable preview into the project (or Designer's folder) and downloads its page. */
   const exportPreview = async (opts: { quiet?: boolean } = {}) => {
+    await host.flush();
     const r = await api<{ files: string[]; link: string | null; html: string; dir: string; inProject: boolean }>('/api/preview', { frames: host.previewFrames() });
     if (opts.quiet) return r;
     download('design-preview.html', r.html, 'text/html');
@@ -407,6 +443,7 @@ function Workspace({ status, start }: { status: Status; start?: StartChoice }) {
         </div>
         <span className="spacer" />
         <UpdatePill />
+        <button className="btn" onClick={() => setActionsOpen(true)}>Actions</button>
         <button className="btn" onClick={() => setModal('figma')}>Import from Figma</button>
         {project ? (
           <>
@@ -424,18 +461,18 @@ function Workspace({ status, start }: { status: Status; start?: StartChoice }) {
       </div>
 
       <div className="body">
+        <nav className="workspace-rail" aria-label="Workspace">
+          {([['layers', 'File'], ['components', 'Assets'], ['chat', 'Agent'], ['comments', 'Comments'], ['versions', 'History']] as const).map(([tab, label]) => (
+            <button key={tab} type="button" className={left === tab ? 'on' : ''} aria-pressed={left === tab} onClick={() => setLeft(tab)}>
+              {label}{tab === 'comments' && openComments > 0 && <span className="badge dark">{openComments}</span>}
+            </button>
+          ))}
+        </nav>
         <aside className="side left">
-          <div className="tabs">
-            {(['chat', 'layers', 'components', 'comments', 'versions'] as LeftTab[]).map((t) => (
-              <button key={t} className={left === t ? 'on' : ''} onClick={() => setLeft(t)}>
-                {t === 'chat' ? 'Chat' : t === 'layers' ? 'Layers' : t === 'components' ? 'Components' : t === 'comments' ? 'Comments' : 'Versions'}
-                {t === 'comments' && openComments > 0 && <span className="badge dark">{openComments}</span>}
-              </button>
-            ))}
-          </div>
           {capsError && left === 'chat' && <div className="error-box" style={{ margin: 8 }}>{capsError}</div>}
           <div className={`pane ${left === 'chat' ? '' : 'hidden'}`}>
-            {chatView === 'chat' && <Chat chat={chat} caps={caps} prefs={prefs} onChoose={choose} context={context} hasProject={!!project} suggestions={suggestions} header={chatHeader} />}
+            {!agentReady && left === 'chat' && <ClaudeSetup status={status} onRecheck={onRecheck} />}
+            {agentReady && chatView === 'chat' && <Chat chat={chat} caps={caps} prefs={prefs} onChoose={choose} context={context} hasProject={!!project} suggestions={suggestions} header={chatHeader} />}
             {chatView === 'history' && (
               <div className="chat" data-canvas-keys="off">
                 {chatHeader}
@@ -450,6 +487,7 @@ function Workspace({ status, start }: { status: Status; start?: StartChoice }) {
             )}
           </div>
           <div className={`pane ${left === 'layers' ? '' : 'hidden'}`}>
+            <FilePanel editor={editor} />
             <Adopt el={host.layersEl} />
           </div>
           <div className={`pane ${left === 'comments' ? '' : 'hidden'}`}>
@@ -483,11 +521,11 @@ function Workspace({ status, start }: { status: Status; start?: StartChoice }) {
             <div className="segmented full" role="tablist" aria-label="Properties">
               <button role="tab" aria-selected={side === 'figma'} className={side === 'figma' ? 'on' : ''} onClick={() => setSide('figma')}>
                 <svg width="12" height="12" viewBox="0 0 16 16" aria-hidden="true"><path d="M5 1.5v13M11 1.5v13M1.5 5h13M1.5 11h13" fill="none" stroke="currentColor" strokeWidth="1.3" /></svg>
-                Figma
+                Design
               </button>
               <button role="tab" aria-selected={side === 'code'} className={side === 'code' ? 'on' : ''} onClick={() => setSide('code')}>
                 <svg width="12" height="12" viewBox="0 0 16 16" aria-hidden="true"><path d="M5.5 4.5L2 8l3.5 3.5M10.5 4.5L14 8l-3.5 3.5" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                Code
+                Inspect
                 {changedFiles > 0 && <span className="badge dark">{changedFiles}</span>}
                 {drift > 0 && (
                   <span className="badge" title={`${drift} token${drift === 1 ? '' : 's'} differ between Figma and code`} aria-label={`${drift} tokens differ`}>
@@ -540,6 +578,19 @@ function Workspace({ status, start }: { status: Status; start?: StartChoice }) {
         </aside>
       </div>
 
+      {actionsOpen && <QuickActions onClose={() => { setActionsOpen(false); editor.root.focus(); }} actions={[
+        ['Find layers', () => window.dispatchEvent(new CustomEvent('designer:navigate', { detail: 'find' }))],
+        ['Keyboard shortcuts', () => editor.showShortcuts?.()],
+        ['New page', () => { setLeft('layers'); editor.store.switchPage(editor.store.addPage()); }],
+        ['Zoom to fit', () => editor.zoomToFit()],
+        ['Zoom to selection', () => editor.zoomToSelection()],
+        ['Place image', () => editor.pickImages()],
+        ['Add auto layout', () => commands.addAutoLayout(editor.store)],
+        ['Remove auto layout', () => commands.removeAutoLayout(editor.store)],
+        ['Tidy up', () => commands.tidyUp(editor.store)],
+        ['Import from Figma', () => setModal('figma')],
+        ['Add project', () => setModal('project')],
+      ]} />}
       {modal === 'project' && (
         <div className="modal-back" onClick={() => setModal(null)}>
           <div onClick={(e) => e.stopPropagation()}>
@@ -547,11 +598,13 @@ function Workspace({ status, start }: { status: Status; start?: StartChoice }) {
               home={status.home}
               current={project?.path}
               onDemo={status.demo ? async () => {
+                await host.flush();
                 await api<ProjectInfo>('/api/demo', {});
                 setModal(null);
               } : undefined}
               onCancel={() => setModal(null)}
               onOpen={async (path) => {
+                await host.flush();
                 await api<ProjectInfo>('/api/project', { path });
                 setModal(null);
               }}

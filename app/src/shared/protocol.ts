@@ -163,6 +163,7 @@ export interface SetupState {
 
 /** A comment pinned to the canvas. Saved as .designer/comments/<id>.json so it travels with the repo. */
 export interface CanvasComment {
+  pageId?: string;
   id: string;
   num: number;
   /** Where it was dropped, in canvas pixels (used if its layer is gone). */

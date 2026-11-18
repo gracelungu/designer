@@ -14,6 +14,48 @@ export function layoutTree(store) {
   for (const id of store.doc.root.slice()) layoutNode(store, id);
 }
 
+function wrappedRows(store, frame, kids) {
+  const { padding, gap } = frame.layout;
+  const width = Math.max(0, frame.w - padding.l - padding.r);
+  const rows = [];
+  for (const node of kids) {
+    if (node.sizing?.h === 'fill' && !node.rotation && Math.abs(node.w - width) > 0.001) {
+      setBox(store, node.id, { x: node.x, y: node.y, w: Math.max(1, width), h: node.h });
+      layoutNode(store, node.id);
+    }
+    const box = store.parentSpaceBox(node);
+    let row = rows.at(-1);
+    if (!row || row.width + gap + box.w > width + 0.001) {
+      row = { items: [], width: 0, height: 0 };
+      rows.push(row);
+    }
+    if (row.items.length) row.width += gap;
+    row.items.push({ node, box });
+    row.width += box.w;
+    row.height = Math.max(row.height, box.h);
+  }
+  return { rows, width };
+}
+
+function layoutWrapped(store, frame, kids) {
+  const { padding, gap, rowGap = gap, primary, counter } = frame.layout;
+  const { rows, width } = wrappedRows(store, frame, kids);
+  let y = frame.y + padding.t;
+  rows.forEach((row, index) => {
+    const free = width - row.width;
+    const offset = primary === 'center' ? free / 2 : primary === 'end' ? free : 0;
+    const spacing = primary === 'space-between' && row.items.length > 1 ? gap + Math.max(0, free) / (row.items.length - 1) : gap;
+    let x = frame.x + padding.l + offset;
+    for (const { node, box } of row.items) {
+      const cross = counter === 'center' ? (row.height - box.h) / 2 : counter === 'end' ? row.height - box.h : 0;
+      store.moveBy(node.id, x - box.x, y + cross - box.y);
+      x += box.w + spacing;
+    }
+    y += row.height + (index < rows.length - 1 ? rowGap : 0);
+  });
+  if (frame.sizing?.v === 'hug') frame.h = y - frame.y + padding.b;
+}
+
 export function layoutNode(store, id) {
   const n = store.get(id);
   if (!n || !n.children) return;
@@ -34,6 +76,10 @@ export function layoutNode(store, id) {
   const kids = n.children.map((c) => store.get(c)).filter((c) => c && c.visible && !c.absolute && !c._dragging);
   const hugMain = n.sizing?.[mainAxis] === 'hug';
   const hugCross = n.sizing?.[crossAxis] === 'hug';
+  if (horiz && L.wrap && !hugMain) {
+    layoutWrapped(store, n, kids);
+    return;
+  }
   const size = (c) => store.parentSpaceBox(c);
   const isFill = (c, ax) => c.sizing?.[ax] === 'fill' && !c.rotation;
 
@@ -96,6 +142,25 @@ export function layoutNode(store, id) {
 export function insertionIndex(store, frame, p, excludeIds = []) {
   const horiz = frame.layout.mode === 'horizontal';
   const kids = frame.children.filter((c) => !excludeIds.includes(c)).map((c) => store.get(c)).filter((c) => c.visible && !c.absolute);
+  if (horiz && frame.layout.wrap && frame.sizing?.h !== 'hug' && kids.length) {
+    const rows = [];
+    for (const child of kids) {
+      const box = store.parentSpaceBox(child);
+      let row = rows.at(-1);
+      if (!row || box.y >= row.maxY && box.y > row.minY) {
+        row = { items: [], minY: box.y, maxY: box.y + box.h };
+        rows.push(row);
+      }
+      row.items.push({ child, box });
+      row.minY = Math.min(row.minY, box.y);
+      row.maxY = Math.max(row.maxY, box.y + box.h);
+    }
+    const distance = (row) => Math.max(row.minY - p.y, p.y - row.maxY, 0);
+    const row = rows.reduce((closest, candidate) => distance(candidate) < distance(closest) ? candidate : closest);
+    const next = row.items.find(({ box }) => p.x < box.x + box.w / 2)?.child;
+    const full = frame.children.filter((c) => !excludeIds.includes(c));
+    return next ? full.indexOf(next.id) : full.indexOf(row.items.at(-1).child.id) + 1;
+  }
   let idx = kids.length;
   for (let i = 0; i < kids.length; i++) {
     const b = store.parentSpaceBox(kids[i]);

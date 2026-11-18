@@ -160,8 +160,10 @@ export class Store {
   }
   restore(snap) {
     const s = JSON.parse(snap);
+    const active = this.pageId();
     this.doc = s.doc;
     this.selection = (s.selection || []).filter((id) => this.doc.nodes[id]);
+    if (active !== this.pageId()) this.emit('page');
   }
   undo() {
     if (this.pending) this.cancel();
@@ -184,6 +186,7 @@ export class Store {
   load(doc, assets = {}) {
     this.doc = doc;
     this.assets = assets;
+    this.pending = null;
     this.selection = [];
     this.undoStack = [];
     this.redoStack = [];
@@ -191,9 +194,96 @@ export class Store {
     this.emit('doc'); this.emit('selection');
   }
 
+  // ---------- pages ----------
+  // Retain the legacy active-page shape so existing canvas files open without conversion.
+  pages() { return [this.doc.page, ...(this.doc.otherPages || [])].sort((a, b) => (a.order ?? 0) - (b.order ?? 0)); }
+  pageId() { return this.doc.page.id ?? 'page-1'; }
+  pageForNode(id) {
+    let n = this.get(id);
+    if (!n) return null;
+    while (n.parent && this.get(n.parent)) n = this.get(n.parent);
+    if (this.doc.root.includes(n.id)) return this.pageId();
+    return this.doc.otherPages?.find((p) => p.root.includes(n.id))?.id ?? null;
+  }
+  switchPage(id) {
+    if (id === this.pageId()) return false;
+    this.cancel();
+    const other = this.doc.otherPages;
+    const index = other?.findIndex((p) => p.id === id) ?? -1;
+    if (index < 0) return false;
+    const next = other.splice(index, 1)[0];
+    other.push({ ...this.doc.page, id: this.pageId(), root: this.doc.root });
+    const { root, ...page } = next;
+    this.doc.page = page;
+    this.doc.root = root;
+    this.selection = [];
+    this.hover = null;
+    this.editingText = null;
+    this.overlay = {};
+    this.emit('selection');
+    this.emit('page');
+    this.emit('doc');
+    return true;
+  }
+  addPage() {
+    return this.transact(() => {
+      const order = Math.max(...this.pages().map((page) => page.order ?? 0)) + 1;
+      let number = this.pages().length + 1;
+      while (this.pages().some((page) => page.name === `Page ${number}`)) number++;
+      const id = uid();
+      (this.doc.otherPages ??= []).push({ id, order, name: `Page ${number}`, background: '#F5F5F5', root: [] });
+      return id;
+    });
+  }
+  duplicatePage(id) {
+    const page = this.pages().find((p) => (p.id ?? 'page-1') === id);
+    if (!page) return null;
+    return this.transact(() => {
+      const order = Math.max(...this.pages().map((p) => p.order ?? 0)) + 1;
+      const roots = this.insertClones((page.root ?? this.doc.root).flatMap((root) => this.cloneSubtree(root)), null);
+      for (const root of roots) this.detach(root);
+      const copy = { ...page, id: uid(), name: page.name + ' copy', order, root: roots };
+      (this.doc.otherPages ??= []).push(copy);
+      return copy.id;
+    });
+  }
+  reorderPage(id, offset) {
+    const pages = this.pages();
+    const index = pages.findIndex((page) => (page.id ?? 'page-1') === id);
+    const next = index + offset;
+    if (index < 0 || next < 0 || next >= pages.length) return;
+    this.transact(() => {
+      const [page] = pages.splice(index, 1);
+      pages.splice(next, 0, page);
+      pages.forEach((item, order) => { item.order = order; });
+    });
+  }
+  removePage(id) {
+    if (this.pages().length < 2 || !this.pages().some((page) => (page.id ?? 'page-1') === id)) return;
+    if (this.pageId() === id) this.switchPage(this.doc.otherPages[0].id);
+    this.transact(() => {
+      const page = this.doc.otherPages.find((p) => p.id === id);
+      const ids = page.root.flatMap((root) => [root, ...this.descendants(root)]);
+      this.doc.otherPages = this.doc.otherPages.filter((p) => p.id !== id);
+      for (const node of ids) delete this.doc.nodes[node];
+    });
+  }
+  moveSelectionToPage(id) {
+    const page = this.doc.otherPages?.find((p) => p.id === id);
+    if (!page) return;
+    this.transact(() => {
+      for (const node of this.selection) {
+        this.reparent(node, null);
+        this.detach(node);
+        page.root.push(node);
+      }
+      this.select([]);
+    });
+  }
+
   // ---------- selection ----------
   select(ids, { add = false, toggle = false } = {}) {
-    ids = ids.filter((id) => this.get(id));
+    ids = ids.filter((id) => this.pageForNode(id) === this.pageId());
     let next;
     if (toggle) {
       next = this.selection.slice();
