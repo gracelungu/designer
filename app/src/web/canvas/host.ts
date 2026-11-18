@@ -1,7 +1,7 @@
 // Creates the canvas editor once, with its toolbar, layers and properties panels, so React can
 // place those panels in the app's own sidebars without remounting them.
-import { bindShortcuts, emptyDoc, Editor, LayersPanel, PropertiesPanel, Toolbar, type EditorNode } from '../../../../editor/src/index.js';
-import type { CanvasOp } from '../../shared/protocol';
+import { bindShortcuts, cssFor, emptyDoc, Editor, exportSVG, LayersPanel, PropertiesPanel, Toolbar, type EditorNode } from '../../../../editor/src/index.js';
+import type { CanvasComment, CanvasOp, PreviewFrame } from '../../shared/protocol';
 import { api } from '../api';
 import { buildNodes, canvasState, freeSpot, placeAt, selectionContext, storyIds, applySimple } from './convert';
 
@@ -17,6 +17,12 @@ export interface CanvasHost {
   showPage(url: string, name?: string): Promise<string>;
   state(): ReturnType<typeof canvasState>;
   context(): ReturnType<typeof selectionContext>;
+  /** Comments as the canvas has them now. */
+  comments(): CanvasComment[];
+  /** Takes comments saved elsewhere (a teammate's, after Get latest, or Claude's replies). */
+  setComments(list: CanvasComment[]): void;
+  /** Every top-level frame drawn for a shareable preview. */
+  previewFrames(): PreviewFrame[];
 }
 
 let host: CanvasHost | undefined;
@@ -41,10 +47,17 @@ export function canvasHost(onAskAI: () => void): CanvasHost {
   bindShortcuts(editor, { layers, onAskAI });
 
   // Save the canvas next to the project (in .designer/canvas.json), so it travels with the repo.
+  // Comments are saved on their own, one file per thread, as soon as they change.
   let saveTimer: ReturnType<typeof setTimeout> | undefined;
   let loading = false;
+  let savedComments = '[]';
   store.on((ch) => {
     if (!ch.has('commit') || loading) return;
+    const comments = JSON.stringify(store.doc.comments ?? []);
+    if (comments !== savedComments) {
+      savedComments = comments;
+      void api('/api/comments', { comments: store.doc.comments ?? [] }).catch(() => undefined);
+    }
     clearTimeout(saveTimer);
     saveTimer = setTimeout(() => void api('/api/canvas', { data: { version: 1, doc: store.doc, assets: store.assets } }).catch(() => undefined), 600);
   });
@@ -73,10 +86,13 @@ export function canvasHost(onAskAI: () => void): CanvasHost {
       clearTimeout(saveTimer);
       loading = true;
       try {
-        const r = await api<{ data: { doc?: unknown; assets?: Record<string, string> } | null }>('/api/canvas').catch(() => ({ data: null }));
+        const r = await api<{ data: { doc?: { comments?: unknown[] }; assets?: Record<string, string> } | null; comments?: CanvasComment[]; author?: string }>('/api/canvas').catch(() => ({ data: null, comments: [] as CanvasComment[], author: undefined }));
         const data = r.data;
         if (data && data.doc) store.load(data.doc, data.assets ?? {});
         else store.load(emptyDoc(), {});
+        store.doc.comments = r.comments ?? [];
+        savedComments = JSON.stringify(store.doc.comments);
+        if (r.author) editor.comments.author = r.author;
         store.view.x = 0;
         store.view.y = 0;
         store.view.zoom = 1;
@@ -165,6 +181,41 @@ export function canvasHost(onAskAI: () => void): CanvasHost {
       });
       focusOn([id]);
       return id;
+    },
+    comments: () => (store.doc.comments ?? []) as CanvasComment[],
+    setComments(list) {
+      const next = JSON.stringify(list);
+      if (next === JSON.stringify(store.doc.comments ?? [])) return;
+      savedComments = next;
+      store.doc.comments = list;
+      if (editor.comments.openId && !list.some((c) => c.id === editor.comments.openId)) editor.comments.close();
+      editor.comments.render();
+      store.emit('comments');
+    },
+    previewFrames() {
+      const tops = store.doc.root.map((id) => store.get(id)!).filter((n) => n && n.visible !== false && ['frame', 'code', 'group', 'component', 'instance'].includes(n.type));
+      const comments = (store.doc.comments ?? []) as CanvasComment[];
+      const inside = (id: string, top: string): boolean => {
+        for (let n = store.get(id); n; n = n.parent ? store.get(n.parent) : undefined) if (n.id === top) return true;
+        return false;
+      };
+      return tops.map((n) => {
+        const box = store.worldBox(n.id);
+        const components: PreviewFrame['components'] = [];
+        const walk = (id: string) => {
+          const c = store.get(id);
+          if (!c) return;
+          if (c.type === 'code' && c.code?.kind === 'component') components.push({ name: c.code.title || c.name, storyId: c.code.storyId, file: c.code.file });
+          else if (c.codeLink && (c.codeLink.storyId || c.codeLink.file)) components.push({ name: c.name, storyId: c.codeLink.storyId, file: c.codeLink.file });
+          for (const k of c.children ?? []) walk(k);
+        };
+        walk(n.id);
+        const pins = comments
+          .map((c) => ({ c, a: editor.comments.anchor(c) }))
+          .filter(({ c, a }) => (c.nodeId && store.get(c.nodeId) ? inside(c.nodeId, n.id) : a.x >= box.x && a.y >= box.y && a.x <= box.x + box.w && a.y <= box.y + box.h))
+          .map(({ c, a }) => ({ id: c.id, x: Math.round(a.x - box.x), y: Math.round(a.y - box.y) }));
+        return { id: n.id, name: n.name, w: box.w, h: box.h, svg: exportSVG(store, [n.id]), css: cssFor(store, n), components, pins };
+      });
     },
     state: () => canvasState(store),
     context: () => selectionContext(store),

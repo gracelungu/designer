@@ -10,7 +10,9 @@ import { ProjectPicker } from './components/ProjectPicker';
 import { DesignPanel } from './components/DesignPanel';
 import { CodePanel, RenderedStyles, useCanvasTick } from './components/CodePanel';
 import { ComponentsPanel } from './components/ComponentsPanel';
+import { CommentsPanel } from './components/CommentsPanel';
 import { canvasHost, reconnectLive, type CanvasHost } from './canvas/host';
+import { download } from '../../../editor/src/index.js';
 
 interface Status {
   claude: ClaudeInstall;
@@ -64,7 +66,7 @@ function ClaudeSetup({ status, onRecheck }: { status: Status; onRecheck: (c: Cla
   );
 }
 
-type LeftTab = 'chat' | 'layers' | 'components';
+type LeftTab = 'chat' | 'layers' | 'components' | 'comments';
 type ChatView = 'chat' | 'history' | 'claude';
 
 function Workspace({ status }: { status: Status }) {
@@ -93,6 +95,7 @@ function Workspace({ status }: { status: Status }) {
   const host = hostRef.current;
   const editor = host.editor;
   useSelectionTick(editor);
+  useCommentsTick(editor);
 
   const loadCaps = useCallback((refresh = false) => {
     setCapsError('');
@@ -116,6 +119,10 @@ function Workspace({ status }: { status: Status }) {
       if (m.type === 'run') {
         setRunning((r) => ({ ...r, [m.kind]: m.url }));
         if (m.kind === 'app') void host.showPage(m.url);
+        return;
+      }
+      if (m.type === 'comments') {
+        host.setComments(m.comments);
         return;
       }
       if (m.type === 'canvas-op') {
@@ -202,9 +209,33 @@ function Workspace({ status }: { status: Status }) {
       const r = await api<{ ok: boolean; message: string; url?: string }>(path, body);
       setToast({ text: r.message, url: r.url });
       await refreshProject();
+      // What the team changed (designs, comments) shows on the canvas straight away.
+      if (path === '/api/git/latest' && r.ok) await host.load();
     } catch (e) {
       setToast({ text: (e as Error).message });
     }
+  };
+
+  /** Writes the shareable preview into the project (or Designer's folder) and downloads its page. */
+  const exportPreview = async (opts: { quiet?: boolean } = {}) => {
+    const r = await api<{ files: string[]; link: string | null; html: string; dir: string; inProject: boolean }>('/api/preview', { frames: host.previewFrames() });
+    if (opts.quiet) return r;
+    download('design-preview.html', r.html, 'text/html');
+    setToast({
+      text: r.inProject ? `Saved a design preview in .designer/preview and downloaded it. ${r.link ? 'Share for review to send developers the link.' : 'Save a version to keep it with the project.'}` : 'Downloaded the design preview.',
+    });
+    await refreshProject();
+    return r;
+  };
+
+  const share = async (title: string, preview: boolean) => {
+    try {
+      if (preview) await exportPreview({ quiet: true });
+    } catch (e) {
+      setToast({ text: `Could not make the design preview: ${(e as Error).message}` });
+      return;
+    }
+    await gitAction('/api/git/share', { title, preview });
   };
 
   const placeStory = async (storyId: string, nextTo = false) => {
@@ -237,6 +268,7 @@ function Workspace({ status }: { status: Status }) {
   const changedFiles = new Set(chat.changes.map((c) => c.path)).size;
   const git = project?.git;
   const hasSelection = editor.store.selection.length > 0;
+  const openComments = host.comments().filter((c) => !c.resolved).length;
 
   const chatHeader = (
     <div className="chat-head">
@@ -288,6 +320,9 @@ function Workspace({ status }: { status: Status }) {
               <button className="opt" onClick={() => (ask('Work out how this project runs and start it so I can see it on the canvas.', false), setProjectMenu(false))}>
                 <span>Run it</span>
               </button>
+              <button className="opt" onClick={() => (exportPreview().catch((e: Error) => setToast({ text: e.message })), setProjectMenu(false))}>
+                <span>Export design preview</span>
+              </button>
               <button className="opt" onClick={() => (void api('/api/project/close', {}), setProjectMenu(false))}>
                 <span>Close project</span>
               </button>
@@ -314,9 +349,10 @@ function Workspace({ status }: { status: Status }) {
       <div className="body">
         <aside className="side left">
           <div className="tabs">
-            {(['chat', 'layers', 'components'] as LeftTab[]).map((t) => (
+            {(['chat', 'layers', 'components', 'comments'] as LeftTab[]).map((t) => (
               <button key={t} className={left === t ? 'on' : ''} onClick={() => setLeft(t)}>
-                {t === 'chat' ? 'Chat' : t === 'layers' ? 'Layers' : 'Components'}
+                {t === 'chat' ? 'Chat' : t === 'layers' ? 'Layers' : t === 'components' ? 'Components' : 'Comments'}
+                {t === 'comments' && openComments > 0 && <span className="badge dark">{openComments}</span>}
               </button>
             ))}
           </div>
@@ -338,6 +374,17 @@ function Workspace({ status }: { status: Status }) {
           </div>
           <div className={`pane ${left === 'layers' ? '' : 'hidden'}`}>
             <Adopt el={host.layersEl} />
+          </div>
+          <div className={`pane ${left === 'comments' ? '' : 'hidden'}`}>
+            <CommentsPanel
+              comments={host.comments()}
+              layerName={(id) => (id ? editor.store.get(id)?.name : undefined)}
+              hasProject={!!project}
+              onOpen={(id) => editor.comments.open(id)}
+              onAsk={(p) => ask(p, false)}
+              onAddComment={() => editor.setTool('comment')}
+              onOpenUrl={(url) => (window.designerNative ? window.designerNative.openExternal(url) : window.open(url, '_blank', 'noopener'))}
+            />
           </div>
           <div className={`pane ${left === 'components' ? '' : 'hidden'}`} data-canvas-keys="off">
             <ComponentsPanel project={project} storybookRunning={!!running.storybook} onPlace={(id) => placeStory(id)} onAsk={(p) => ask(p, false)} onAddProject={() => setModal('project')} />
@@ -420,8 +467,9 @@ function Workspace({ status }: { status: Status }) {
           body="Sends your saved versions to the team as a pull request, on a branch of their own."
           placeholder="Title for the review"
           action="Share"
+          option="Include a design preview for developers (frames, comments and specs, with a link in the pull request)"
           onClose={() => setModal(null)}
-          onSubmit={(t) => gitAction('/api/git/share', { title: t })}
+          onSubmit={(t, preview) => void share(t, !!preview)}
         />
       )}
       {modal === 'figma' && <FigmaImport sessionRunning={s.running} onClose={() => (setModal(null), setLeft('chat'), setChatView('chat'))} />}
@@ -452,6 +500,21 @@ function useSelectionTick(editor: CanvasHost['editor']) {
   useEffect(() => editor.store.on((ch) => (ch.has('selection') ? tick() : undefined)), [editor]);
 }
 
+/** Re-renders when comments may have changed (a commit, or comments arriving from the team or Claude). */
+function useCommentsTick(editor: CanvasHost['editor']) {
+  const [, tick] = useReducer((x: number) => x + 1, 0);
+  useEffect(() => {
+    let last = '';
+    return editor.store.on((ch) => {
+      if (!ch.has('commit') && !ch.has('comments') && !ch.has('doc')) return;
+      const now = JSON.stringify(editor.store.doc.comments ?? []);
+      if (now === last) return;
+      last = now;
+      tick();
+    });
+  }, [editor]);
+}
+
 /** Shows a DOM element owned by the canvas (layers, properties, the canvas itself) inside React's tree. */
 function Adopt({ el, className }: { el: HTMLElement; className?: string }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -477,17 +540,23 @@ function CanvasHint({ editor, onFigma, onComponents }: { editor: CanvasHost['edi
   );
 }
 
-function TextModal({ title, body, placeholder, action, onClose, onSubmit }: { title: string; body: string; placeholder: string; action: string; onClose: () => void; onSubmit: (t: string) => void }) {
+function TextModal({ title, body, placeholder, action, option, onClose, onSubmit }: { title: string; body: string; placeholder: string; action: string; option?: string; onClose: () => void; onSubmit: (t: string, option?: boolean) => void }) {
   const [text, setText] = useState('');
+  const [checked, setChecked] = useState(true);
   return (
     <div className="modal-back" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()} data-canvas-keys="off">
         <h3>{title}</h3>
         <p>{body}</p>
-        <input className="input" style={{ width: '100%' }} autoFocus placeholder={placeholder} value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && (onSubmit(text), onClose())} />
+        <input className="input" style={{ width: '100%' }} autoFocus placeholder={placeholder} value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && (onSubmit(text, option ? checked : undefined), onClose())} />
+        {option && (
+          <label className="modal-option">
+            <input type="checkbox" checked={checked} onChange={(e) => setChecked(e.target.checked)} /> {option}
+          </label>
+        )}
         <div className="actions">
           <button className="btn" onClick={onClose}>Cancel</button>
-          <button className="btn primary" onClick={() => (onSubmit(text), onClose())}>{action}</button>
+          <button className="btn primary" onClick={() => (onSubmit(text, option ? checked : undefined), onClose())}>{action}</button>
         </div>
       </div>
     </div>

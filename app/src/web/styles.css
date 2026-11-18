@@ -341,3 +341,26 @@ textarea.memory { width: 100%; min-height: 160px; border: 1px solid var(--line-2
 .figma-opt { display: flex; gap: 8px; align-items: center; margin-top: 12px; }
 .link-btn { border: 0; background: none; padding: 0; margin-top: 12px; color: var(--muted); font-size: 11.5px; text-decoration: underline; }
 .figma-import .actions { display: flex; gap: 8px; align-items: center; margin-top: 16px; }
+
+/* Comments: canvas pins and pull request threads */
+.comments-panel { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.comments-panel .scroll { flex: 1; overflow: auto; }
+.cp-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 12px; font-size: 11.5px; }
+.cp-toggle { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); }
+.cp-item { display: flex; gap: 8px; align-items: flex-start; padding: 8px 12px; cursor: pointer; border-top: 1px solid var(--line); }
+.cp-item:hover { background: var(--bg-2); }
+.cp-item.resolved { opacity: 0.6; }
+.cp-num { flex: none; min-width: 22px; height: 22px; padding: 0 4px; border-radius: 11px 11px 11px 2px; background: var(--primary); color: var(--on-primary); font-size: 10.5px; font-weight: 600; display: grid; place-items: center; }
+.cp-num.pr { border-radius: 6px; background: var(--bg-2); color: var(--text); }
+.cp-body { flex: 1; min-width: 0; }
+.cp-meta { font-size: 11px; color: var(--muted); }
+.cp-meta b { color: var(--text); }
+.cp-text { white-space: pre-wrap; word-break: break-word; }
+.cp-pr-title { padding: 0 12px 8px; }
+.cp-thread { padding: 8px 12px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 6px; }
+.cp-thread.resolved { opacity: 0.65; }
+.cp-msg { font-size: 12px; }
+.cp-actions { display: flex; gap: 4px; }
+.cp-reply { display: flex; gap: 6px; align-items: flex-end; }
+.cp-reply textarea { flex: 1; height: auto; padding: 6px 8px; resize: vertical; font: inherit; }
+.modal-option { display: flex; gap: 6px; align-items: flex-start; margin-top: 10px; font-size: 12px; color: var(--muted); }

@@ -74,12 +74,14 @@ export declare class Editor {
   root: HTMLElement;
   store: Store;
   code: { info: Map<string, CodeInfo>; interacting: string | null; interact(id: string | null): void; post(id: string, msg: Record<string, unknown>): void; syncArgs(id: string, force?: boolean): void; frames: Map<string, any> };
+  comments: { author: string; showAlways: boolean; openId: string | null; open(id: string): void; close(): void; render(): void; anchor(c: any): { x: number; y: number } };
   setTool(id: string): void;
   zoomToFit(): void;
   zoomToSelection(): void;
   zoomStep(dir: number): void;
   zoomAt(zoom: number): void;
   zoomToBox(b: { x: number; y: number; w: number; h: number }, opts?: { max?: number; pad?: number }): void;
+  rect(): DOMRect;
   viewRect(): { x: number; y: number; w: number; h: number };
   pickImages(): void;
   showShortcuts?: () => void;

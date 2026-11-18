@@ -58,7 +58,8 @@ export async function readComments(designerDir: string): Promise<CanvasComment[]
   const out: CanvasComment[] = [];
   for (const f of files) {
     if (!f.endsWith('.json')) continue;
-    const c = cleanComment(await readFile(join(dir, f), 'utf8').then((t) => JSON.parse(t) as unknown, () => null));
+    // A file half-merged or edited by hand is skipped rather than breaking the whole canvas.
+    const c = cleanComment(await readFile(join(dir, f), 'utf8').then((t) => JSON.parse(t) as unknown).catch(() => null));
     if (c) out.push(c);
   }
   return numberComments(out);
