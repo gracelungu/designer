@@ -393,6 +393,17 @@ textarea.memory { width: 100%; min-height: 160px; border: 1px solid var(--line-2
 .setup-steps .detail { grid-column: 2; font-size: 11px; color: var(--faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .setup-error { margin: 8px 6px 0 0; max-height: 120px; overflow: auto; font-size: 11px; white-space: pre-wrap; color: var(--del-text); background: var(--del); padding: 6px 8px; border-radius: 6px; }
 .setup-actions { display: flex; gap: 6px; justify-content: flex-end; margin: 8px 6px 0 0; }
+.setup-card { max-height: calc(100% - 140px); overflow: auto; }
+.setup-message { margin: 4px 6px 0 20px; color: var(--muted); font-size: 12px; line-height: 1.4; }
+.setup-where { display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 8px 6px 0 20px; font-size: 11px; color: var(--muted); }
+.setup-notes { margin: 6px 6px 0 20px; padding-left: 14px; font-size: 11px; color: var(--muted); display: grid; gap: 2px; }
+.setup-log-toggle { margin: 6px 0 0 14px; border: 0; background: none; padding: 2px 6px; font-size: 11px; color: var(--faint); cursor: pointer; border-radius: 4px; }
+.setup-log-toggle:hover { background: var(--bg-2); color: var(--text); }
+.setup-log { list-style: none; margin: 4px 6px 0 20px; padding: 6px 8px; display: grid; gap: 2px; max-height: 180px; overflow: auto; background: var(--bg-2); border-radius: 6px; font-size: 11px; }
+.setup-log li { display: grid; grid-template-columns: 12px 1fr; column-gap: 6px; color: var(--muted); }
+.setup-log li > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.setup-log li.running { color: var(--text); }
+.setup-log li.error { color: var(--del-text); }
 .comp-section { padding: 10px 12px 4px; font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
 .comp-props { padding: 0 8px 6px 34px; color: var(--faint); font-size: 11px; line-height: 1.45; }
 /* First-run onboarding */

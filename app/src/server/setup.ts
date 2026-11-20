@@ -1,6 +1,6 @@
-// Zero-config project setup: when a project is added, work out what it is built with and how it
-// runs, install it if it has never been installed, start its dev server, and list its components.
-// Everything here reads files only; nothing executes the project's own code except the dev server.
+// Project facts read from files only: a quick guess at how a project runs (framework, package manager,
+// dev command), handed to Claude as a starting point for setup (see runner.ts), and the component index.
+// Nothing here executes the project's own code.
 
 import { readFile, readdir, stat } from 'node:fs/promises';
 import { createServer } from 'node:net';

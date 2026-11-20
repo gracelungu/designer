@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { ComponentEntry, ProjectInfo } from '../../shared/protocol';
+import type { ComponentEntry, ProjectInfo, ProjectProfile } from '../../shared/protocol';
 
 const storyPrompt = (c: ComponentEntry) =>
   `Write a Storybook story file (CSF3) for the ${c.name} component in ${c.file}${c.exportName === 'default' ? ' (default export)' : ''}, with one story per meaningful variant of its props${c.props.length ? ` (${c.props.map((p) => p.name).join(', ')})` : ''}. Set Storybook up first if the repo does not have it, following the repo's tooling. Then show it on the canvas.`;
@@ -28,12 +28,15 @@ function Unstoried({ list, onAsk }: { list: ComponentEntry[]; onAsk: (p: string)
 /** The repo's components, from its stories. Clicking one puts it on the canvas, rendered live from code. */
 export function ComponentsPanel({
   project,
+  profile,
   storybookRunning,
   onPlace,
   onAsk,
   onAddProject,
 }: {
   project: ProjectInfo | null;
+  /** What setup found about the project; without Storybook, the running app is the preview. */
+  profile?: ProjectProfile;
   storybookRunning: boolean;
   onPlace: (storyId: string) => Promise<void>;
   onAsk: (prompt: string) => void;
@@ -55,10 +58,17 @@ export function ComponentsPanel({
   const list = project.stories.filter((e) => !filter || e.title.toLowerCase().includes(filter.toLowerCase()));
   const components = project.components ?? [];
   const unstoried = components.filter((c) => !c.storyIds.length && (!filter || c.name.toLowerCase().includes(filter.toLowerCase())));
+  const appOnly = profile && profile.components !== 'storybook' && profile.preview !== 'none';
   if (!project.stories.length)
     return (
-      <div className={components.length ? 'scroll components-panel' : 'empty'}>
-        {components.length ? (
+      <div className={components.length || appOnly ? 'scroll components-panel' : 'empty'}>
+        {appOnly && (
+          <div className="hint" style={{ paddingTop: 10 }}>
+            This project previews as the running app on the canvas{profile.stack ? ` (${profile.stack})` : ''}. Ask Claude for a change and the app frame updates live.
+            {components.length ? ' To place components one at a time, they need stories.' : ''}
+          </div>
+        )}
+        {appOnly ? null : components.length ? (
           <div className="hint" style={{ paddingTop: 10 }}>
             Found {components.length} component{components.length === 1 ? '' : 's'} in this repo. The canvas renders a component from its story, so give it one to place it.
           </div>
@@ -68,7 +78,7 @@ export function ComponentsPanel({
         {components.length > 0 && <Unstoried list={unstoried} onAsk={onAsk} />}
         <div style={{ margin: components.length ? '10px 12px' : '10px 0 0' }}>
           <button className="btn" onClick={() => onAsk('Find the main reusable UI components in this repo and write a Storybook story file (CSF3) for each one, with one story per meaningful variant. Set Storybook up first if the repo does not have it, following the repo’s tooling. Then show the Button (or the most used component) on the canvas.')}>
-            Ask Claude to set up components
+            {appOnly ? 'Add stories for single components' : 'Ask Claude to set up components'}
           </button>
         </div>
       </div>

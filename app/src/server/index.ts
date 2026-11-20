@@ -12,9 +12,9 @@ import { findTokens, updateToken } from './tokens.js';
 import { importVariables, pullFromFigma, setLink, tokenReport, useFigmaValue } from './designTokens.js';
 import { DevProcess, diffFor, findRunningStorybook, getLatest, gitStatus, listDir, projectInfo, readMemory, saveVersion, shareForReview, writeMemory } from './project.js';
 import { PreviewProxies } from './proxy.js';
-import { AutoSetup } from './autosetup.js';
+import { describeSetup, ProjectRunner } from './runner.js';
 import { planProject } from './setup.js';
-import { handleMcp, SYSTEM_PROMPT, type ToolHost } from './mcp.js';
+import { handleMcp, serveMcp, SYSTEM_PROMPT, type ToolHost } from './mcp.js';
 import { FigmaClient, figmaStatus, parseOutline } from './figma.js';
 import { demoAvailable, installDemo } from './demo.js';
 import { readSettings, writeSettings, type Settings } from './settings.js';
@@ -41,8 +41,6 @@ export interface ServerOptions {
   figmaUrls?: string[];
   /** Set up and run a project as soon as it is added (default true). */
   autoSetup?: boolean;
-  /** Replaces dependency installation (tests). */
-  install?: (command: string, cwd: string) => Promise<void>;
   /** The bundled demo project to copy from, if this build ships one. */
   demoDir?: string;
   /** Takes the before/after screenshots (default: a headless Chrome-family browser found on the computer). */
@@ -73,11 +71,23 @@ export async function startServer(opts: ServerOptions = {}) {
   const app = new DevProcess('dev');
   const storybook = new DevProcess('storybook');
   const proxies = new PreviewProxies();
-  const setup = new AutoSetup();
   let figma: FigmaClient | undefined;
   let reviews: { cwd: string; remote?: string; provider: ReviewProvider | null } | undefined;
   const waiting = new Map<string, (r: unknown) => void>();
   let serverUrl = '';
+  // Setup: Claude reads the opened repo, works out how it runs and starts it (or Designer replays what worked last time).
+  const setup = new ProjectRunner({
+    claudePath: () => (claude.found && claude.loggedIn !== false ? claude.path : undefined),
+    model: () => session?.model,
+    mcp: (runId) => ({ type: 'http', url: `${serverUrl}/mcp/setup`, headers: { 'x-designer-token': token, 'x-designer-run': runId } }),
+    app,
+    storybook,
+    publish: (state) => broadcast({ type: 'setup', setup: state }),
+    onUrl: (kind, url) => broadcast({ type: 'run', kind, url }),
+    onFinish: (state) => {
+      if (session && state.project === projectPath) session.note(describeSetup(state));
+    },
+  });
   // Design -> code jobs, and the watcher that tells the canvas when code changed under it.
   const codeSync = new CodeSync({
     claudePath: () => (claude.found ? claude.path : undefined),
@@ -132,6 +142,7 @@ export async function startServer(opts: ServerOptions = {}) {
         onTurnEnd: () => void visualReviews.end().then(announce, () => undefined),
       });
       void addAzureServer();
+      if (projectPath && setup.state?.project === projectPath && setup.state.status !== 'running') session.note(describeSetup(setup.state));
       if (!projectPath) session.note(`No project is open yet. You are in Designer's own folder (${workspace}); new projects made from scratch can go here.`);
     }
     return session;
@@ -178,20 +189,14 @@ export async function startServer(opts: ServerOptions = {}) {
     const info = await projectInfo(p);
     broadcast({ type: 'project', project: info });
     if (isNew) broadcast({ type: 'setup', setup: null });
-    // Zero-config: work out how it runs, install, start it and get its components ready, in the background.
+    // Setup: Claude works out how it runs and starts it (or the saved recipe does), in the background.
     if (autoRun && (isNew || setup.state?.status === 'failed')) void autoSetup(p);
     void addAzureServer();
     return info;
   }
 
-  function autoSetup(p: string) {
-    return setup.run(p, {
-      app,
-      install: opts.install,
-      publish: (state) => broadcast({ type: 'setup', setup: state }),
-      onAppUrl: (url) => broadcast({ type: 'run', kind: 'app', url }),
-      warmStorybook: () => storybookUrl(),
-    });
+  function autoSetup(p: string, fresh = false) {
+    return setup.start(p, { fresh });
   }
 
   async function askCanvas(op: CanvasOp): Promise<unknown> {
@@ -244,9 +249,10 @@ export async function startServer(opts: ServerOptions = {}) {
     openProject: async (path) => {
       const info = await openProject(path, true);
       const scripts = Object.entries(info.scripts).map(([k, v]) => `  ${k}: ${v}`).join('\n') || '  (none)';
-      const plan = await planProject(info.path);
       const comps = info.components.slice(0, 40).map((c) => `  ${c.name} (${c.file}${c.storyIds.length ? `, stories: ${c.storyIds.join(', ')}` : ', no story'})`).join('\n');
-      return `Opened ${info.path}. Designer is now installing (if needed) and starting it by itself; do not start it again unless the user asks.\nFramework: ${plan.frameworkName}, package manager: ${plan.packageManager}, app folder: ${plan.appDir}, dev command: ${plan.devCommand ?? 'none found'}.\nComponents (${info.components.length}):\n${comps || '  (none found)'}\nGit: ${info.git.isRepo ? `${info.git.branch ?? ''}${info.git.remote ? ` (remote ${info.git.remote})` : ' (no remote)'}` : 'not a git repository'}\nScripts:\n${scripts}\nStorybook stories: ${info.stories.reduce((n, s) => n + s.stories.length, 0)} in ${info.stories.length} files.\nNote: your own working folder is still ${session?.cwd ?? home()}; use absolute paths or cd into the project.`;
+      const s = setup.state;
+      const how = s && s.project === info.path && s.status !== 'running' ? describeSetup(s) : 'Designer is now getting it running by itself (a separate Claude Code run reads the repo and starts it). You will get a note with what it found; do not start it again unless the user asks.';
+      return `Opened ${info.path}. ${how}\nComponents (${info.components.length}):\n${comps || '  (none found)'}\nGit: ${info.git.isRepo ? `${info.git.branch ?? ''}${info.git.remote ? ` (remote ${info.git.remote})` : ' (no remote)'}` : 'not a git repository'}\nScripts:\n${scripts}\nStorybook stories: ${info.stories.reduce((n, s) => n + s.stories.length, 0)} in ${info.stories.length} files.\nNote: your own working folder is still ${session?.cwd ?? home()}; use absolute paths or cd into the project.`;
     },
     runProject: async (command, kind) => {
       try {
@@ -343,7 +349,13 @@ export async function startServer(opts: ServerOptions = {}) {
     },
     'GET /api/project': async () => (projectPath ? projectInfo(projectPath) : null),
     'GET /api/project/setup': async () => setup.state ?? null,
-    'POST /api/project/setup': async () => autoSetup(requireProject()),
+    'POST /api/project/setup': async (body) => {
+      const p = requireProject();
+      // Answers right away; progress streams over the socket.
+      void autoSetup(p, body.fresh === true);
+      await new Promise((r) => setTimeout(r, 50));
+      return setup.state ?? null;
+    },
     'GET /api/project/plan': async () => planProject(requireProject()),
     'GET /api/components': async () => (await projectInfo(requireProject())).components,
     'GET /api/capabilities': async () => capsCache ?? capabilities(),
@@ -579,7 +591,7 @@ export async function startServer(opts: ServerOptions = {}) {
     }
   }
 
-  async function handleMcpHttp(req: IncomingMessage, res: ServerResponse) {
+  async function handleMcpHttp(req: IncomingMessage, res: ServerResponse, serve: (body: unknown) => Promise<unknown> = (body) => handleMcp(body, tools)) {
     if (req.headers['x-designer-token'] !== token) return json(res, 403, { error: 'Missing or wrong token' });
     if (req.method === 'DELETE') return json(res, 200, {});
     if (req.method !== 'POST') {
@@ -594,7 +606,7 @@ export async function startServer(opts: ServerOptions = {}) {
     } catch {
       return json(res, 400, { jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error' } });
     }
-    const out = await handleMcp(body, tools);
+    const out = await serve(body);
     if (out === null) {
       res.writeHead(202);
       return res.end();
@@ -608,6 +620,7 @@ export async function startServer(opts: ServerOptions = {}) {
     const url = new URL(req.url ?? '/', `http://${req.headers.host}`);
     if (url.pathname.startsWith('/api/')) return handleApi(req, res, url);
     if (url.pathname === '/mcp') return handleMcpHttp(req, res);
+    if (url.pathname === '/mcp/setup') return handleMcpHttp(req, res, (body) => serveMcp(body, setup.tools(req.headers['x-designer-run'] as string | undefined)));
     if (!staticDir) return json(res, 404, { error: 'UI not built. Run npm run build, or use npm run dev.' });
     let file = normalize(join(staticDir, decodeURIComponent(url.pathname)));
     if (!file.startsWith(staticDir) || !(await stat(file).then((s) => s.isFile(), () => false))) file = join(staticDir, 'index.html');
