@@ -141,24 +141,72 @@ export interface ProjectPlan {
   notes: string[];
 }
 
-export type SetupStepId = 'detect' | 'index' | 'install' | 'start' | 'storybook';
-export interface SetupStep {
-  id: SetupStepId;
+export type SetupTaskStatus = 'pending' | 'running' | 'done' | 'skipped' | 'failed';
+/** One step of getting a project running, as Claude planned it (or Designer, when it replays a saved recipe). */
+export interface SetupTask {
+  id: string;
   label: string;
-  status: 'pending' | 'running' | 'done' | 'skipped' | 'failed';
+  status: SetupTaskStatus;
   detail?: string;
 }
+/** Something Claude did while setting up: a command it ran, a file it read, a server it started. */
+export interface SetupActivity {
+  id: string;
+  kind: 'run' | 'read' | 'search' | 'edit' | 'preview' | 'web' | 'other';
+  text: string;
+  status: 'running' | 'done' | 'error';
+}
 
-/** Progress of the automatic setup that runs when a project is added. */
+/** What Claude found out about a project and how Designer previews it. Adapts the app to the repo. */
+export interface ProjectProfile {
+  /** One or two plain sentences on what the repo is. */
+  summary: string;
+  /** Short stack label, e.g. "Next.js + Tailwind (pnpm)". */
+  stack: string;
+  /** What Designer shows on the canvas: the running app, Storybook stories, both, or nothing yet. */
+  preview: 'app' | 'storybook' | 'both' | 'none';
+  /** How single components get onto the canvas: from Storybook stories, or only as part of the running app. */
+  components: 'storybook' | 'app' | 'none';
+  /** Things the designer should know (env vars it stubbed, pages worth opening, caveats). */
+  notes: string[];
+  /** A path in the app worth opening first, e.g. "/dashboard". */
+  startPath?: string;
+}
+
+/** A command that starts or prepares the project, as it worked once. `$PORT` in the command is a free port. */
+export interface RecipeCommand {
+  command: string;
+  /** Folder to run it in, relative to the project. */
+  cwd: string;
+  env?: Record<string, string>;
+}
+/** How a project runs, saved in .designer/run.json after a setup works, so the next open is instant. */
+export interface RunRecipe {
+  version: 1;
+  /** Prepare steps (install, codegen) and a path that, when it exists, means the step can be skipped. */
+  prepare: (RecipeCommand & { skipIf?: string })[];
+  app?: RecipeCommand;
+  storybook?: RecipeCommand;
+  profile: ProjectProfile;
+  savedAt: string;
+}
+
+/** Progress of the setup that runs when a project is added: Claude reads the repo and gets it running. */
 export interface SetupState {
   project: string;
   status: 'running' | 'done' | 'failed';
-  plan?: ProjectPlan;
-  steps: SetupStep[];
+  /** Who is doing it: Designer replaying the saved recipe, or Claude working it out. */
+  by: 'saved' | 'claude';
+  tasks: SetupTask[];
+  activity: SetupActivity[];
+  /** Claude's latest words, shown under the title while it works. */
+  message?: string;
+  profile?: ProjectProfile;
   appUrl?: string;
   storybookUrl?: string;
-  components: number;
   error?: string;
+  startedAt: number;
+  finishedAt?: number;
 }
 
 /** A comment pinned to the canvas. Saved as .designer/comments/<id>.json so it travels with the repo. */

@@ -124,10 +124,18 @@ export const TOOLS = [
 
 type Rpc = { jsonrpc: '2.0'; id?: string | number; method: string; params?: Record<string, unknown> };
 
-/** Answers one JSON-RPC message (or batch). Returns null for notifications. */
-export async function handleMcp(body: unknown, host: ToolHost): Promise<unknown> {
+/** A set of tools served over MCP: Designer's canvas tools for the chat, or the setup tools for a setup run. */
+export interface ToolServer {
+  name: string;
+  instructions: string;
+  tools: { name: string; description: string; inputSchema: Record<string, unknown> }[];
+  call(name: string, args: Record<string, unknown>): Promise<string>;
+}
+
+/** Answers one JSON-RPC message (or batch) for a tool server. Returns null for notifications. */
+export async function serveMcp(body: unknown, server: ToolServer): Promise<unknown> {
   if (Array.isArray(body)) {
-    const out = (await Promise.all(body.map((b) => handleMcp(b, host)))).filter((x) => x !== null);
+    const out = (await Promise.all(body.map((b) => serveMcp(b, server)))).filter((x) => x !== null);
     return out.length ? out : null;
   }
   const m = body as Rpc;
@@ -138,18 +146,18 @@ export async function handleMcp(body: unknown, host: ToolHost): Promise<unknown>
       return ok({
         protocolVersion: (m.params?.protocolVersion as string) ?? '2025-06-18',
         capabilities: { tools: { listChanged: false } },
-        serverInfo: { name: 'designer', version: '0.2.0' },
-        instructions: 'Designer is the app the user is talking to you from. These tools act on its canvas and on the project it has open.',
+        serverInfo: { name: server.name, version: '0.3.0' },
+        instructions: server.instructions,
       });
     case 'ping':
       return ok({});
     case 'tools/list':
-      return ok({ tools: TOOLS });
+      return ok({ tools: server.tools });
     case 'tools/call': {
       const name = String(m.params?.name ?? '');
       const a = (m.params?.arguments ?? {}) as Record<string, unknown>;
       try {
-        const text = await callTool(name, a, host);
+        const text = await server.call(name, a);
         return ok({ content: [{ type: 'text', text }] });
       } catch (e) {
         return ok({ content: [{ type: 'text', text: (e as Error).message }], isError: true });
@@ -158,6 +166,16 @@ export async function handleMcp(body: unknown, host: ToolHost): Promise<unknown>
     default:
       return { jsonrpc: '2.0', id: m.id, error: { code: -32601, message: `Unknown method ${m.method}` } };
   }
+}
+
+/** Designer's canvas tools for the chat session. */
+export function handleMcp(body: unknown, host: ToolHost): Promise<unknown> {
+  return serveMcp(body, {
+    name: 'designer',
+    instructions: 'Designer is the app the user is talking to you from. These tools act on its canvas and on the project it has open.',
+    tools: TOOLS,
+    call: (name, a) => callTool(name, a, host),
+  });
 }
 
 async function callTool(name: string, a: Record<string, unknown>, host: ToolHost): Promise<string> {
@@ -191,12 +209,12 @@ async function callTool(name: string, a: Record<string, unknown>, host: ToolHost
 export const SYSTEM_PROMPT = `You are running inside Designer, a Figma-like canvas app that sits on top of the user's code. The user is often a designer: explain in plain words, keep git jargon out unless asked, and show your work on the canvas when it helps.
 
 Designer gives you tools (the "designer" MCP server):
-- open_project: when the user mentions a project or folder, find it on disk and open it. If no project is open and the request needs one, ask which project, or look in common places (~/dev, ~/code, ~/Projects, ~/src) for a match.
-- run_project: work out how the project runs (package.json scripts, README, framework) and start it; install dependencies first if needed. Use kind "storybook" for the component previews.
+- open_project: when the user mentions a project or folder, find it on disk and open it. If no project is open and the request needs one, ask which project, or look in common places (~/dev, ~/code, ~/Projects, ~/src) for a match. Opening a project starts Designer's setup: a separate Claude Code run reads the repo, works out how it runs (any stack: Vite, Next, Storybook, Rails, Django, a static site...) and starts it. You get a note with what it found; do not start the project again yourself unless the user asks or setup failed.
+- run_project: start (or restart) the project's dev server (kind "app") or its Storybook (kind "storybook") with a command you choose. Use it to fix a failed setup or when the user asks.
 - get_canvas: read what the user has selected on the canvas.
 - add_to_canvas / update_layers: put editable design layers on the canvas (for example a frame you read from Figma with the figma MCP server, or a layout from scratch). Use real values and auto layout.
 - get_design_tokens: the repo's tokens paired with the Figma variables, with drift. Style with these tokens, never raw values when a token exists. When code and Figma disagree, Figma is the design source unless the user says otherwise.
 - get_comments / reply_to_comment: read the comments the team pinned on canvas frames, and answer or resolve them when you address them.
-- show_component: render one coded component (by Storybook story id) on the canvas as a design layer, live from code, so it can sit next to its Figma design and look identical.
+- show_component: render one coded component (by Storybook story id) on the canvas as a design layer, live from code, so it can sit next to its Figma design and look identical. It needs the project to use Storybook.
 
-When a coded component should match a design: read the design (Figma MCP or get_canvas), use the repo's own tokens and components, then show_component next to the design and compare. If the project has no Storybook stories for a component, write a CSF3 story for it (one story per variant), so Designer can render it on the canvas.`;
+Projects differ: follow what setup found (the note about how this project runs). When the project previews as a running app, edit the code and the app frame on the canvas updates live; point the user to the page that shows the change. When it has Storybook, a coded component should match a design this way: read the design (Figma MCP or get_canvas), use the repo's own tokens and components, then show_component next to the design and compare. Only add Storybook or new stories when the user wants single components on the canvas and the repo already uses Storybook, or the user agrees to add it.`;

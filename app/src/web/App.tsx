@@ -96,6 +96,7 @@ function Workspace({ status, start }: { status: Status; start?: StartChoice }) {
   const [chat, dispatch] = useReducer(chatReducer, initialChat);
   const [project, setProject] = useState<ProjectInfo | null>(null);
   const [setup, setSetup] = useState<SetupState | null>(null);
+  const [revealSetup, setRevealSetup] = useState(0);
   const [caps, setCaps] = useState<Capabilities>();
   const [capsError, setCapsError] = useState('');
   const [left, setLeft] = useState<LeftTab>('chat');
@@ -393,9 +394,14 @@ function Workspace({ status, start }: { status: Status; start?: StartChoice }) {
               <button className="opt" onClick={() => (setModal('project'), setProjectMenu(false))}>
                 <span>Open another project…</span>
               </button>
-              <button className="opt" onClick={() => (void api('/api/project/setup', {}), setProjectMenu(false))}>
+              <button className="opt" onClick={() => (void api('/api/project/setup', {}), setRevealSetup((n) => n + 1), setProjectMenu(false))}>
                 <span>Run it again</span>
               </button>
+              {setup && (
+                <button className="opt" onClick={() => (setRevealSetup((n) => n + 1), setProjectMenu(false))}>
+                  <span>Show setup steps</span>
+                </button>
+              )}
               <button className="opt" onClick={() => (exportPreview().catch((e: Error) => setToast({ text: e.message })), setProjectMenu(false))}>
                 <span>Export design preview</span>
               </button>
@@ -464,7 +470,7 @@ function Workspace({ status, start }: { status: Status; start?: StartChoice }) {
             />
           </div>
           <div className={`pane ${left === 'components' ? '' : 'hidden'}`} data-canvas-keys="off">
-            <ComponentsPanel project={project} storybookRunning={!!running.storybook} onPlace={(id) => placeStory(id)} onAsk={(p) => ask(p, false)} onAddProject={() => setModal('project')} />
+            <ComponentsPanel project={project} profile={setup?.project === project?.path ? setup?.profile : undefined} storybookRunning={!!running.storybook} onPlace={(id) => placeStory(id)} onAsk={(p) => ask(p, false)} onAddProject={() => setModal('project')} />
           </div>
           <div className={`pane ${left === 'versions' ? '' : 'hidden'}`}>
             {left === 'versions' && <VersionsPanel hasProject={!!project} onToast={setToast} onAsk={(p) => ask(p, false)} />}
@@ -475,7 +481,7 @@ function Workspace({ status, start }: { status: Status; start?: StartChoice }) {
           <Adopt el={host.stage} className="stage-host" />
           <SyncBar sync={sync} onOpen={() => (setSide('code'), setSyncOpen(true))} />
           <CanvasHint editor={editor} onFigma={() => setModal('figma')} onComponents={() => setLeft('components')} />
-          <SetupCard setup={setup} onRetry={() => void api('/api/project/setup', {}).catch(() => undefined)} onAsk={(p) => ask(p, false)} />
+          <SetupCard setup={setup} reveal={revealSetup} onRetry={(fresh) => void api('/api/project/setup', { fresh }).catch(() => undefined)} onAsk={(p) => ask(p, false)} />
         </main>
 
         <aside className="side right">

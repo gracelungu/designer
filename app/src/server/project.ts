@@ -239,8 +239,9 @@ export function waitingForAnswer(output: string): string | undefined {
 }
 
 export function findLocalUrl(text: string): string | undefined {
-  const m = /https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\]):\d+(?:\/[^\s)'"`,]*)?/.exec(text);
-  return m ? m[0].replace(/[/.]+$/, '') : undefined;
+  const m = /https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\]|0\.0\.0\.0):\d+(?:\/[^\s)'"`,]*)?/.exec(text);
+  // A server bound to every interface prints 0.0.0.0, which a browser can't open: use localhost.
+  return m ? m[0].replace(/[/.]+$/, '').replace('//0.0.0.0:', '//localhost:') : undefined;
 }
 
 /** Ports a Storybook for this project might already be on: the one in its script, then Storybook's defaults. */
@@ -288,8 +289,11 @@ export class DevProcess {
   cwd?: string;
   log: string[] = [];
   constructor(readonly script: string) {}
-  /** Starts a dev server and resolves with the first local URL it prints. Any shell command works; the default is `npm run <script>`. */
-  start(cwd: string, command?: string, env: Record<string, string> = {}): Promise<string> {
+  /**
+   * Starts a dev server and resolves with the first local URL it prints. Any shell command works; the default
+   * is `npm run <script>`. With `waitUrl`, it resolves once that URL answers instead (for servers that print none).
+   */
+  start(cwd: string, command?: string, env: Record<string, string> = {}, waitUrl?: string): Promise<string> {
     // Storybook asks yes/no questions in a terminal (e.g. "Port 6006 is not available, use 6007?"). Nobody
     // can answer them here, so run it with --ci: it then takes the next free port and never waits for input.
     const cmd = command?.trim() || (this.script === 'storybook' ? 'npm run storybook -- --ci' : `npm run ${this.script}`);
@@ -324,6 +328,21 @@ export class DevProcess {
       };
       p.stdout?.on('data', onData);
       p.stderr?.on('data', onData);
+      if (waitUrl) {
+        const poll = async () => {
+          while (this.proc === p && !this.url) {
+            const up = await fetch(waitUrl, { signal: AbortSignal.timeout(2000) }).then(() => true, () => false);
+            if (up && this.proc === p && !this.url) {
+              this.url = waitUrl.replace(/\/+$/, '');
+              clearTimeout(timer);
+              resolveUrl(this.url);
+              return;
+            }
+            await new Promise((r) => setTimeout(r, 500));
+          }
+        };
+        void poll();
+      }
       p.on('exit', (code) => {
         clearTimeout(timer);
         if (this.proc !== p) return;
