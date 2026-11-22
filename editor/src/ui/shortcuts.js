@@ -51,7 +51,7 @@ export function bindShortcuts(editor, { layers, onShortcuts, onAskAI } = {}) {
   const listen = (target, type, fn) => { target.addEventListener(type, fn); offs.push(() => target.removeEventListener(type, fn)); };
 
   listen(window, 'keydown', (e) => {
-    if (isTyping(e.target)) return;
+    if (editor.root.closest('[inert]') || isTyping(e.target)) return;
     const mod = e.metaKey || e.ctrlKey;
     const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
     const code = e.code;
@@ -170,20 +170,20 @@ export function bindShortcuts(editor, { layers, onShortcuts, onAskAI } = {}) {
 
   // ---- clipboard ----
   listen(document, 'copy', (e) => {
-    if (isTyping(e.target) || isTyping(document.activeElement) || hasTextSelection() || !store.selection.length) return;
+    if (editor.root.closest('[inert]') || isTyping(e.target) || isTyping(document.activeElement) || hasTextSelection() || !store.selection.length) return;
     clipboard = C.copy(store);
     e.clipboardData.setData('text/plain', JSON.stringify(clipboard));
     e.preventDefault();
   });
   listen(document, 'cut', (e) => {
-    if (isTyping(e.target) || isTyping(document.activeElement) || hasTextSelection() || !store.selection.length) return;
+    if (editor.root.closest('[inert]') || isTyping(e.target) || isTyping(document.activeElement) || hasTextSelection() || !store.selection.length) return;
     clipboard = C.copy(store);
     e.clipboardData.setData('text/plain', JSON.stringify(clipboard));
     e.preventDefault();
     C.deleteSelection(store);
   });
   listen(document, 'paste', (e) => {
-    if (isTyping(e.target) || isTyping(document.activeElement)) return;
+    if (editor.root.closest('[inert]') || isTyping(e.target) || isTyping(document.activeElement)) return;
     e.preventDefault();
     const files = [...(e.clipboardData?.files || [])].filter((f) => f.type.startsWith('image/'));
     if (files.length) { editor.insertImages(files); return; }

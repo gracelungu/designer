@@ -21,6 +21,7 @@ import { SyncController } from './sync/controller';
 import { CommentsPanel } from './components/CommentsPanel';
 import { download } from '../../../editor/src/index.js';
 import { ReviewViewer, SendForReview, VisualChanges } from './components/VisualReview';
+import { useTeamSync } from './sync/team';
 import { VersionsPanel } from './components/Versions';
 
 interface Status {
@@ -308,6 +309,7 @@ function Workspace({ status, start, onRecheck }: { status: Status; start?: Start
 
   const gitAction = async (path: string, body: unknown) => {
     try {
+      await host.flush();
       const r = await api<{ ok: boolean; message: string; url?: string; files?: string[] }>(path, body);
       setToast({ text: r.message, url: r.url });
       await refreshProject();
@@ -362,6 +364,12 @@ function Workspace({ status, start, onRecheck }: { status: Status; start?: Start
 
   const changedFiles = new Set(chat.changes.map((c) => c.path)).size;
   const git = project?.git;
+  const afterTeamSync = useCallback(async (changed: boolean) => {
+    if (changed) await reconnectLive(host, running);
+    await refreshProject();
+  }, [host, running, refreshProject]);
+  const team = useTeamSync(project?.path, git?.branch, host,
+    openingProject || !workspaceReady || !!modal || s.busy || setup?.status === 'running', afterTeamSync);
   const hasSelection = editor.store.selection.length > 0;
   // Selecting a layer shows its code; the Tokens and Changes tabs stay one click away.
   const [lastSel, setLastSel] = useState(hasSelection);
@@ -437,6 +445,11 @@ function Workspace({ status, start, onRecheck }: { status: Status; start?: Start
               <button className="opt" onClick={() => (setModal('project'), setProjectMenu(false))}>
                 <span>Open another project…</span>
               </button>
+              {git?.isRepo && (
+                <button className="opt" onClick={() => { setProjectMenu(false); setLeft('versions'); }}>
+                  <span>Team sync</span>
+                </button>
+              )}
               <button className="opt" onClick={() => { setProjectMenu(false); void runPreview().catch((e: Error) => setToast({ text: e.message })); }}>
                 <span>Run preview</span>
               </button>
@@ -532,7 +545,7 @@ function Workspace({ status, start, onRecheck }: { status: Status; start?: Start
             />
           </div>
           <div className={`pane ${left === 'versions' ? '' : 'hidden'}`}>
-            {left === 'versions' && <VersionsPanel hasProject={!!project} onToast={setToast} onAsk={(p) => ask(p, false)} />}
+            {left === 'versions' && <VersionsPanel project={project?.path} onToast={setToast} onAsk={(p) => ask(p, false)} flushCanvas={host.flush} team={team} />}
           </div>
         </aside>
 

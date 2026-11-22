@@ -342,6 +342,30 @@ export interface Variation {
   title: string;
   /** On the team's copy too. */
   shared: boolean;
+  remoteOnly?: boolean;
+}
+
+export interface WorkspaceManifest {
+  format: 'designer-workspace';
+  version: 1;
+  id: string;
+  name: string;
+}
+
+export interface WorkspaceTracking {
+  manifest: WorkspaceManifest | null;
+  tracked: boolean;
+  pending: boolean;
+  defaultName: string;
+  canvasTracked: boolean;
+  commentThreads: number;
+  reason: string | null;
+}
+
+export interface TeamSyncStatus {
+  branch: string | null;
+  enabledBranch: string | null;
+  reason: string | null;
 }
 
 export interface VersionHistory {
