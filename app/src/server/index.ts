@@ -26,6 +26,7 @@ import { AzureReviews, reviewProvider, type ReviewProvider } from './reviews.js'
 import type { Capabilities, CanvasComment, CanvasOp, CanvasState, ClaudeInstall, ClientMessage, PreviewFrame, ServerMessage } from '../shared/protocol.js';
 import { Camera, ReviewManager, reviewsDir, summarize, type Shooter } from './visual.js';
 import { sendForReview } from './share.js';
+import { trackWorkspace, workspaceTracking } from './workspaceTracking.js';
 import { designSyncNeeded, fetchTeamBranches, setTeamSync, syncDesignBranch, teamSyncStatus } from './teamSync.js';
 import { createVariation, deleteVariation, history, mergeVariation, nameVersion, restoreVersion, switchVariation, syncWithTeam, versionFiles } from './versions.js';
 
@@ -481,6 +482,15 @@ export async function startServer(opts: ServerOptions = {}) {
       broadcast({ type: 'project', project: await projectInfo(cwd) });
       return r;
     },
+    'GET /api/git/workspace': async () => workspaceTracking(requireProject()),
+    'POST /api/git/workspace': async (body) => gitOperation(async () => {
+      const cwd = requireProject();
+      if (body.project !== cwd) throw new HttpError(409, 'The open project changed. Reopen its workspace settings.');
+      if (typeof body.name !== 'string' || typeof body.branch !== 'string' || (body.id !== null && typeof body.id !== 'string')) {
+        throw new HttpError(400, 'Enter a workspace name on the current branch.');
+      }
+      return trackWorkspace(cwd, body.branch, body.name, body.id);
+    }),
     'GET /api/git/team': async () => teamSyncStatus(requireProject()),
     'POST /api/git/team/settings': async (body) => {
       const cwd = requireProject();

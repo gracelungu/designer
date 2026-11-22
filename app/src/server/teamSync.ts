@@ -1,12 +1,13 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { TeamSyncStatus } from '../shared/protocol.js';
+import { WORKSPACE_MANIFEST } from './workspaceTracking.js';
 import { friendlyGitError } from './share.js';
 
 const run = promisify(execFile);
 const CONFIG = 'designer.autoSyncBranch';
 const gitError = (error: unknown) => friendlyGitError(error).replace(/(https?:\/\/)[^\s/@]+@/g, '$1');
-const isDesignPath = (path: string) => path === '.designer/canvas.json' || /^\.designer\/comments\/[\w-]{1,64}\.json$/.test(path);
+const isDesignPath = (path: string) => path === WORKSPACE_MANIFEST || path === '.designer/canvas.json' || /^\.designer\/comments\/[\w-]{1,64}\.json$/.test(path);
 
 async function git(cwd: string, ...args: string[]) {
   return (await run('git', args, {
@@ -71,6 +72,10 @@ export async function fetchTeamBranches(cwd: string) {
 }
 
 const entries = (text: string) => text.split('\0').filter(Boolean);
+const isDesignChange = (entry: string) => {
+  const path = entry.slice(3);
+  return isDesignPath(path) && !(path === WORKSPACE_MANIFEST && entry.startsWith('??'));
+};
 
 /** Check for work without changing the branch or blocking the canvas. */
 export async function designSyncNeeded(cwd: string, branch: string) {
@@ -84,7 +89,7 @@ export async function designSyncNeeded(cwd: string, branch: string) {
       git(cwd, 'status', '--porcelain=v1', '-z', '--no-renames', '--untracked-files=all', '--', '.designer'),
     ]);
     const remoteHead = remote.trim().split('\t')[0];
-    return { needed: remoteHead !== head.trim() || entries(worktree).some((entry) => isDesignPath(entry.slice(3))) };
+    return { needed: remoteHead !== head.trim() || entries(worktree).some(isDesignChange) };
   } catch (error) {
     throw new Error(gitError(error), { cause: error });
   }
@@ -113,7 +118,7 @@ export async function syncDesignBranch(cwd: string, expectedBranch: string, auto
     ]);
     const [ahead, behind] = range.trim().split(/\s+/).map(Number);
     const paths = entries(worktree).map((entry) => entry.slice(3));
-    const design = paths.filter(isDesignPath);
+    const design = entries(worktree).filter(isDesignChange).map((entry) => entry.slice(3));
 
     if (ahead || design.length || !remoteHead) {
       const commits = entries(await git(cwd, 'log', '--diff-merges=first-parent', '--no-renames', '--format=', '--name-only', '-z', `${reference}..HEAD`));

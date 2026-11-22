@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { VersionEntry, VersionHistory } from '../../shared/protocol';
 import { api, socket } from '../api';
+import { WorkspaceTracking } from './WorkspaceTracking';
 import type { useTeamSync } from '../sync/team';
 
 type Result = { ok: boolean; message: string };
@@ -24,8 +25,8 @@ export function variationLabel(name: string, main: string) {
  * Version history the way Figma shows it: the current version on top, named versions as milestones,
  * every saved version below with Restore; and variations (branches) to try ideas on the side.
  */
-export function VersionsPanel({ hasProject, onToast, onAsk, flushCanvas, team }: {
-  hasProject: boolean;
+export function VersionsPanel({ project, onToast, onAsk, flushCanvas, team }: {
+  project?: string;
   onToast: (t: { text: string; url?: string }) => void;
   onAsk: (p: string) => void;
   flushCanvas: () => Promise<void>;
@@ -40,12 +41,12 @@ export function VersionsPanel({ hasProject, onToast, onAsk, flushCanvas, team }:
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(() => {
-    if (!hasProject) return;
+    if (!project) return;
     api<VersionHistory>('/api/versions').then(
       (x) => (setH(x), setError('')),
       (e: Error) => setError(e.message),
     );
-  }, [hasProject]);
+  }, [project]);
   useEffect(load, [load]);
   useEffect(() => { if (team.notice && !team.notice.error) load(); }, [team.notice, load]);
   // Anything that changes the project (a save, a turn by Claude, a sync) refreshes the list.
@@ -69,7 +70,7 @@ export function VersionsPanel({ hasProject, onToast, onAsk, flushCanvas, team }:
     }
   };
 
-  if (!hasProject) return <div className="empty">Add a project to see its version history.</div>;
+  if (!project) return <div className="empty">Add a project to see its version history.</div>;
   if (error)
     return (
       <div className="scroll">
@@ -108,6 +109,10 @@ export function VersionsPanel({ hasProject, onToast, onAsk, flushCanvas, team }:
         </div>
         {team.notice && <span role="status" className={team.notice.error ? 'error-box' : 'muted'}>{team.notice.text}</span>}
       </div>
+      {h.branch && project && (
+        <WorkspaceTracking key={JSON.stringify([project, h.branch])} project={project} branch={h.branch}
+          automatic={team.auto} disabled={team.busy || busy} revision={h.versions[0]?.id} onSaved={load} />
+      )}
       <div className="section-title">
         <span>Variation</span>
         <button className="btn ghost small" onClick={() => setNewVariation('')} disabled={busy || team.busy}>+ New</button>

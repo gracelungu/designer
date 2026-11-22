@@ -545,7 +545,7 @@ function Workspace({ status, start, onRecheck }: { status: Status; start?: Start
             />
           </div>
           <div className={`pane ${left === 'versions' ? '' : 'hidden'}`}>
-            {left === 'versions' && <VersionsPanel hasProject={!!project} onToast={setToast} onAsk={(p) => ask(p, false)} flushCanvas={host.flush} team={team} />}
+            {left === 'versions' && <VersionsPanel project={project?.path} onToast={setToast} onAsk={(p) => ask(p, false)} flushCanvas={host.flush} team={team} />}
           </div>
         </aside>
 

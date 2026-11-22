@@ -72,3 +72,7 @@ Automatic sync checks for changes about every 30 seconds while the Designer wind
 3. Build the three way document merge and conflict UI, then gate Git merges with schema and referential integrity checks. Add remote failures and concurrent edit fixtures.
 4. Publish component, variable, and style libraries with immutable versions, dependency pins, previews, update acceptance, and rollback.
 5. Connect provider identity, pull request reviews, access policy, CI preview exports, and audit data where those APIs are available. Introduce live transport only if simultaneous editing becomes a requirement.
+
+## Opting into a tracked workspace
+
+Open **Versions → Shared workspace → Set up shared workspace** to choose a shared name and create `.designer/workspace.json`. This small manifest starts with a schema version and a stable workspace ID. Designer stages only this manifest. Collaborators receive it as part of the branch once committed and synced. Renaming preserves its ID, and imported workspaces can be tracked explicitly. The setup respects repository ignore rules and leaves credentials and the automatic sync preference in the local environment. The document and library manifests in the proposed schema can build on this workspace ID as those features land.

@@ -54,6 +54,12 @@ it('automatically publishes from one Designer window and joins and updates from 
   try {
     const sender = await open(alice);
     await sender.clock.install();
+    await sender.getByText('Shared workspace', { exact: true }).click();
+    await sender.getByRole('button', { name: 'Set up shared workspace' }).click();
+    await sender.getByRole('textbox', { name: 'Workspace name' }).fill('Product design');
+    await sender.getByRole('button', { name: 'Create and track workspace' }).click();
+    await sender.getByText('Product design · Changes waiting for a commit').waitFor();
+    expect(git(alice, 'diff', '--cached', '--name-only')).toBe('.designer/workspace.json');
     await edit(sender, 'First review');
     await sender.getByRole('checkbox', { name: 'Automatically sync this branch' }).click();
     await sender.getByText('Automatic sync enabled', { exact: false }).waitFor();
@@ -63,6 +69,9 @@ it('automatically publishes from one Designer window and joins and updates from 
     const teammate = await open(bob);
     await teammate.getByRole('button', { name: 'Refresh branches' }).click();
     await teammate.getByRole('button', { name: 'New navigation · team branch' }).click();
+    await teammate.locator('[data-testid="variation"].on', { hasText: 'New navigation' }).waitFor();
+    await teammate.getByText('Shared workspace', { exact: true }).click();
+    await teammate.getByText('Product design · Tracked in Git').waitFor();
     await teammate.getByRole('button', { name: 'Layers', exact: true }).click();
     await teammate.getByRole('tree').getByText('First review', { exact: true }).waitFor();
 

@@ -1,9 +1,10 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { fetchTeamBranches, setTeamSync, syncDesignBranch, teamSyncStatus } from '../src/server/teamSync';
+import { trackWorkspace, workspaceTracking, WORKSPACE_MANIFEST } from '../src/server/workspaceTracking';
 import { history, switchVariation } from '../src/server/versions';
 
 const branch = 'design/new-navigation';
@@ -64,6 +65,31 @@ describe('Git design collaboration', () => {
     rmSync(join(bob, 'notes.txt'));
     expect(await syncDesignBranch(bob, branch, false)).toMatchObject({ ok: true, changed: true });
     expect(readFileSync(join(bob, canvas), 'utf8')).toContain('New navigation');
+  });
+
+  it('keeps an existing manifest private until it is tracked and preserves its ID when renamed', async () => {
+    git(alice, 'switch', '-c', branch);
+    expect(await workspaceTracking(alice)).toMatchObject({ manifest: null, tracked: false });
+    expect(existsSync(join(alice, WORKSPACE_MANIFEST))).toBe(false);
+    const id = '02d79a85-c9a6-4d5e-a42d-59caadde03a5';
+    put(alice, WORKSPACE_MANIFEST, JSON.stringify({ format: 'designer-workspace', version: 1, id, name: 'Private draft' }));
+    expect(await syncDesignBranch(alice, branch, false)).toMatchObject({ ok: true });
+    expect(git(remote, 'ls-tree', '-r', '--name-only', `refs/heads/${branch}`)).not.toContain(WORKSPACE_MANIFEST);
+    expect(await trackWorkspace(alice, branch, 'Product', id)).toMatchObject({ manifest: { id, name: 'Product' }, tracked: true, pending: true });
+    expect(git(alice, 'diff', '--cached', '--name-only')).toBe(WORKSPACE_MANIFEST);
+    expect(await syncDesignBranch(alice, branch, false)).toMatchObject({ ok: true });
+    expect(JSON.parse(git(remote, 'show', `refs/heads/${branch}:${WORKSPACE_MANIFEST}`))).toMatchObject({ id, name: 'Product' });
+  });
+
+  it('respects ignore rules and leaves unsupported manifest versions alone', async () => {
+    git(alice, 'switch', '-c', branch);
+    put(alice, '.gitignore', '.designer/\n');
+    await expect(trackWorkspace(alice, branch, 'Private', null)).rejects.toThrow('Git ignores');
+    expect(existsSync(join(alice, WORKSPACE_MANIFEST))).toBe(false);
+    rmSync(join(alice, '.gitignore'));
+    put(alice, WORKSPACE_MANIFEST, '{"version":99}');
+    await expect(trackWorkspace(alice, branch, 'Product', null)).rejects.toThrow('cannot read');
+    expect(readFileSync(join(alice, WORKSPACE_MANIFEST), 'utf8')).toBe('{"version":99}');
   });
 
   it('requires explicit branch opt in and stops on divergence or unpublished code', async () => {

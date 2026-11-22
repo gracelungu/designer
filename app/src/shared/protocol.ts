@@ -345,6 +345,23 @@ export interface Variation {
   remoteOnly?: boolean;
 }
 
+export interface WorkspaceManifest {
+  format: 'designer-workspace';
+  version: 1;
+  id: string;
+  name: string;
+}
+
+export interface WorkspaceTracking {
+  manifest: WorkspaceManifest | null;
+  tracked: boolean;
+  pending: boolean;
+  defaultName: string;
+  canvasTracked: boolean;
+  commentThreads: number;
+  reason: string | null;
+}
+
 export interface TeamSyncStatus {
   branch: string | null;
   enabledBranch: string | null;
