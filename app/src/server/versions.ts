@@ -72,7 +72,10 @@ export async function history(cwd: string, limit = 60): Promise<VersionHistory> 
   }
   const versions: VersionEntry[] = parseLog(log).map((v) => ({ ...v, local: !st.remote || local.has(v.id), name: names.get(v.id) }));
   const heads = await git(cwd, ['for-each-ref', 'refs/heads', `--format=%(refname:short)${US}%(committerdate:unix)${US}%(subject)${US}%(upstream)${US}%(HEAD)`]).catch(() => '');
-  const remoteHeads = new Set((await git(cwd, ['for-each-ref', 'refs/remotes/origin', '--format=%(refname:strip=3)']).catch(() => '')).split('\n').filter(Boolean));
+  const remoteHeads = new Map((await git(cwd, ['for-each-ref', 'refs/remotes/origin', `--format=%(refname:strip=3)${US}%(committerdate:unix)${US}%(subject)${US}%(symref)`]).catch(() => ''))
+    .split('\n').filter(Boolean).map((line) => line.split(US))
+    .filter(([name, , , symref]) => !symref && name !== 'designer-screenshots')
+    .map(([name, date, title]) => [name, { name, updated: Number(date) * 1000, title, shared: true, current: false, remoteOnly: true }] as const));
   const variations: Variation[] = heads
     .split('\n')
     .filter(Boolean)
@@ -80,7 +83,9 @@ export async function history(cwd: string, limit = 60): Promise<VersionHistory> 
       const [name, date, title, upstream, head] = l.split(US);
       return { name, updated: Number(date) * 1000, title, shared: !!upstream || remoteHeads.has(name), current: head === '*' };
     })
-    .sort((a, b) => (a.name === base ? -1 : b.name === base ? 1 : b.updated - a.updated));
+  for (const variation of variations) remoteHeads.delete(variation.name);
+  variations.push(...remoteHeads.values());
+  variations.sort((a, b) => (a.name === base ? -1 : b.name === base ? 1 : b.updated - a.updated));
   return { branch: st.branch, main: base, versions, variations, unsaved: st.changed.length, ahead: st.ahead, behind: st.behind, remote: st.remote };
 }
 
@@ -158,8 +163,11 @@ export async function switchVariation(cwd: string, name: string): Promise<Action
     const local = (await git(cwd, ['rev-parse', '--verify', '-q', `refs/heads/${name}`]).catch(() => '')).trim();
     const remote = (await git(cwd, ['rev-parse', '--verify', '-q', `refs/remotes/origin/${name}`]).catch(() => '')).trim();
     if (!local && !remote) return { ok: false, message: `There is no variation called ${name}.` };
-    const saved = await saveAll(cwd, `Work in progress on ${st.branch ?? 'this variation'}`);
-    await git(cwd, local ? ['switch', name] : ['switch', '--track', '-c', name, `origin/${name}`]);
+    if (!local && (await git(cwd, ['status', '--porcelain'])).trim()) {
+      return { ok: false, message: 'Save or set aside your local changes before joining the team branch.' };
+    }
+    const saved = local && await saveAll(cwd, `Work in progress on ${st.branch ?? 'this variation'}`);
+    await git(cwd, local ? ['switch', '--', name] : ['switch', '--track', '-c', name, `refs/remotes/origin/${name}`]);
     return { ok: true, message: `Opened ${name}.${saved ? ' Your unsaved changes were saved on the variation you left.' : ''}` };
   } catch (e) {
     return { ok: false, message: friendlyGitError(e) };

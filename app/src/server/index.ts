@@ -26,6 +26,7 @@ import { AzureReviews, reviewProvider, type ReviewProvider } from './reviews.js'
 import type { Capabilities, CanvasComment, CanvasOp, CanvasState, ClaudeInstall, ClientMessage, PreviewFrame, ServerMessage } from '../shared/protocol.js';
 import { Camera, ReviewManager, reviewsDir, summarize, type Shooter } from './visual.js';
 import { sendForReview } from './share.js';
+import { designSyncNeeded, fetchTeamBranches, setTeamSync, syncDesignBranch, teamSyncStatus } from './teamSync.js';
 import { createVariation, deleteVariation, history, mergeVariation, nameVersion, restoreVersion, switchVariation, syncWithTeam, versionFiles } from './versions.js';
 
 export interface ServerOptions {
@@ -317,6 +318,17 @@ export async function startServer(opts: ServerOptions = {}) {
     return join(dir, 'canvas.json');
   }
 
+  let gitOperationRunning = false;
+  async function gitOperation<T>(action: () => Promise<T>) {
+    if (gitOperationRunning) throw new HttpError(409, 'Wait for the current Git action to finish.');
+    gitOperationRunning = true;
+    try {
+      return await action();
+    } finally {
+      gitOperationRunning = false;
+    }
+  }
+
   const routes: Record<string, (body: Record<string, unknown>, url: URL) => Promise<unknown>> = {
     'GET /api/status': async () => {
       const settings = await readSettings(workspace);
@@ -429,12 +441,12 @@ export async function startServer(opts: ServerOptions = {}) {
       return tokenReport(cwd);
     },
     'GET /api/diff': async (_b, url) => diffFor(requireProject(), String(url.searchParams.get('path'))),
-    'POST /api/git/latest': async () => {
+    'POST /api/git/latest': async () => gitOperation(async () => {
       const r = await getLatest(requireProject());
       // Tell the canvas what the pull changed, so linked layers can follow the code.
       const change = r.ok ? await headWatcher.check('pull') : null;
       return { ...r, files: change?.files ?? [] };
-    },
+    }),
     'GET /api/sync': async () => codeSync.list(projectPath),
     'POST /api/sync/to-code': async (body) => {
       requireProject();
@@ -442,8 +454,8 @@ export async function startServer(opts: ServerOptions = {}) {
     },
     'POST /api/sync/keep': async (body) => codeSync.keep(String(body.id)),
     'POST /api/sync/discard': async (body) => codeSync.discard(String(body.id)),
-    'POST /api/git/save': async (body) => saveVersion(requireProject(), String(body.message ?? '')),
-    'POST /api/git/share': async (body) => shareForReview(requireProject(), String(body.title ?? ''), { preview: !!body.preview }),
+    'POST /api/git/save': async (body) => gitOperation(async () => saveVersion(requireProject(), String(body.message ?? ''))),
+    'POST /api/git/share': async (body) => gitOperation(async () => shareForReview(requireProject(), String(body.title ?? ''), { preview: !!body.preview })),
     'GET /api/visual-reviews': async () => visualReviews.list(),
     'POST /api/visual-reviews/retake': async (body) => visualReviews.retake(String(body.id)),
     'POST /api/visual-reviews/remove': async (body) => {
@@ -469,15 +481,37 @@ export async function startServer(opts: ServerOptions = {}) {
       broadcast({ type: 'project', project: await projectInfo(cwd) });
       return r;
     },
+    'GET /api/git/team': async () => teamSyncStatus(requireProject()),
+    'POST /api/git/team/settings': async (body) => {
+      const cwd = requireProject();
+      if (body.project !== cwd) throw new HttpError(409, 'The open project changed. Configure sync from the current project.');
+      return setTeamSync(cwd, body.enabled === true, String(body.branch ?? ''));
+    },
+    'POST /api/git/team/fetch': async () => gitOperation(async () => {
+      await fetchTeamBranches(requireProject());
+      return { ok: true, message: 'Team branches refreshed.' };
+    }),
+    'POST /api/git/team/check': async (body) => {
+      const cwd = requireProject();
+      if (body.project !== cwd) return { needed: false };
+      return designSyncNeeded(cwd, String(body.branch ?? ''));
+    },
+    'POST /api/git/team/sync': async (body) => gitOperation(async () => {
+      const cwd = requireProject();
+      if (body.project !== cwd) throw new HttpError(409, 'The open project changed. Try again from the current project.');
+      const result = await syncDesignBranch(cwd, String(body.branch ?? ''), body.automatic === true);
+      if (result.changed && projectPath === cwd) await headWatcher.check('pull');
+      return result;
+    }),
     'GET /api/versions': async () => history(requireProject()),
     'GET /api/versions/files': async (_b, url) => versionFiles(requireProject(), String(url.searchParams.get('id') ?? '')),
-    'POST /api/versions/name': async (body) => afterGit(await nameVersion(requireProject(), String(body.name ?? ''), String(body.description ?? ''))),
-    'POST /api/versions/restore': async (body) => afterGit(await restoreVersion(requireProject(), String(body.id ?? '')), true),
-    'POST /api/variations/create': async (body) => afterGit(await createVariation(requireProject(), String(body.name ?? ''))),
-    'POST /api/variations/switch': async (body) => afterGit(await switchVariation(requireProject(), String(body.name ?? '')), true),
-    'POST /api/variations/merge': async (body) => afterGit(await mergeVariation(requireProject(), String(body.name ?? '')), true),
-    'POST /api/variations/delete': async (body) => afterGit(await deleteVariation(requireProject(), String(body.name ?? ''))),
-    'POST /api/git/sync': async () => afterGit(await syncWithTeam(requireProject()), true),
+    'POST /api/versions/name': async (body) => gitOperation(async () => afterGit(await nameVersion(requireProject(), String(body.name ?? ''), String(body.description ?? '')))),
+    'POST /api/versions/restore': async (body) => gitOperation(async () => afterGit(await restoreVersion(requireProject(), String(body.id ?? '')), true)),
+    'POST /api/variations/create': async (body) => gitOperation(async () => afterGit(await createVariation(requireProject(), String(body.name ?? '')))),
+    'POST /api/variations/switch': async (body) => gitOperation(async () => afterGit(await switchVariation(requireProject(), String(body.name ?? '')), true)),
+    'POST /api/variations/merge': async (body) => gitOperation(async () => afterGit(await mergeVariation(requireProject(), String(body.name ?? '')), true)),
+    'POST /api/variations/delete': async (body) => gitOperation(async () => afterGit(await deleteVariation(requireProject(), String(body.name ?? '')))),
+    'POST /api/git/sync': async () => gitOperation(async () => afterGit(await syncWithTeam(requireProject()), true)),
     'POST /api/run/app': async (body) => ({ url: await runDev('app', body.command ? String(body.command) : undefined) }),
     'POST /api/run/storybook': async (body) => ({ url: await runDev('storybook', body.command ? String(body.command) : undefined) }),
     'GET /api/run': async () => ({ app: app.url ?? null, storybook: storybook.url ?? null }),

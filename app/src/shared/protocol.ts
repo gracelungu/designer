@@ -342,6 +342,13 @@ export interface Variation {
   title: string;
   /** On the team's copy too. */
   shared: boolean;
+  remoteOnly?: boolean;
+}
+
+export interface TeamSyncStatus {
+  branch: string | null;
+  enabledBranch: string | null;
+  reason: string | null;
 }
 
 export interface VersionHistory {

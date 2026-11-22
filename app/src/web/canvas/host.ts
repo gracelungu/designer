@@ -14,6 +14,7 @@ export interface CanvasHost {
   load(): Promise<void>;
   /** Finish saving the current canvas before switching projects. */
   flush(): Promise<void>;
+  canSync(): boolean;
   apply(op: CanvasOp): Promise<unknown>;
   placeStory(storyId: string, opts?: { nextToSelection?: boolean; title?: string; file?: string; args?: Record<string, unknown> }): Promise<string>;
   showPage(url: string, name?: string): Promise<string>;
@@ -59,6 +60,23 @@ export function canvasHost(onAskAI: () => void): CanvasHost {
   let loadId = 0;
   let savedComments = '[]';
   let saving = Promise.resolve<unknown>(undefined);
+  let savingComments = Promise.resolve<unknown>(undefined);
+  let commentsScheduled = '[]';
+  const saveComments = () => {
+    const next = JSON.stringify(store.doc.comments ?? []);
+    if (next === commentsScheduled) return;
+    commentsScheduled = next;
+    savingComments = savingComments.catch(() => undefined).then(async () => {
+      if (next !== savedComments) {
+        await api('/api/comments', { comments: JSON.parse(next) });
+        savedComments = next;
+      }
+    }).catch((error) => {
+      if (commentsScheduled === next) commentsScheduled = savedComments;
+      throw error;
+    });
+    void savingComments.catch(() => undefined);
+  };
   const saveCanvas = async () => {
     clearTimeout(saveTimer);
     saveTimer = undefined;
@@ -68,11 +86,7 @@ export function canvasHost(onAskAI: () => void): CanvasHost {
   };
   store.on((ch) => {
     if (!ch.has('commit') || loading) return;
-    const comments = JSON.stringify(store.doc.comments ?? []);
-    if (comments !== savedComments) {
-      savedComments = comments;
-      void api('/api/comments', { comments: store.doc.comments ?? [] }).catch(() => undefined);
-    }
+    saveComments();
     clearTimeout(saveTimer);
     saveTimer = setTimeout(() => void saveCanvas().catch(() => undefined), 600);
   });
@@ -99,9 +113,11 @@ export function canvasHost(onAskAI: () => void): CanvasHost {
     propsEl,
     async flush() {
       if (loading) throw new Error('Wait for the canvas to open.');
-      if (saveTimer) await saveCanvas();
-      else await saving;
+      store.flush();
+      saveComments();
+      await Promise.all([saveTimer ? saveCanvas() : saving, savingComments]);
     },
+    canSync: () => !loading && !store.pending && !store.editingText,
     async load() {
       clearTimeout(saveTimer);
       saveTimer = undefined;
@@ -114,7 +130,7 @@ export function canvasHost(onAskAI: () => void): CanvasHost {
         if (data && data.doc) store.load(data.doc, data.assets ?? {});
         else store.load(emptyDoc(), {});
         store.doc.comments = r.comments ?? [];
-        savedComments = JSON.stringify(store.doc.comments);
+        savedComments = commentsScheduled = JSON.stringify(store.doc.comments);
         if (r.author) editor.comments.author = r.author;
         store.view.x = 0;
         store.view.y = 0;
@@ -208,7 +224,7 @@ export function canvasHost(onAskAI: () => void): CanvasHost {
     setComments(list) {
       const next = JSON.stringify(list);
       if (next === JSON.stringify(store.doc.comments ?? [])) return;
-      savedComments = next;
+      savedComments = commentsScheduled = next;
       store.doc.comments = list;
       if (editor.comments.openId && !list.some((c) => c.id === editor.comments.openId)) editor.comments.close();
       editor.comments.render();

@@ -43,6 +43,9 @@ export declare class Store {
   doc: { name: string; nodes: Record<string, EditorNode>; root: string[]; comments: any[]; page: { name: string; background: string } };
   assets: Record<string, string>;
   selection: string[];
+  pending: string | null;
+  editingText: string | null;
+  flush(): void;
   view: { x: number; y: number; zoom: number };
   tool: string;
   undoStack: string[];
