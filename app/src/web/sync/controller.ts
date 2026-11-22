@@ -1,7 +1,7 @@
 // Runs the two-way sync for the open canvas: sends canvas edits on linked layers to Claude Code,
 // holds the code change it proposes for review, and brings linked layers up to date when code changes.
-import type { EditorNode, Store } from '../../../../editor/src/index.js';
-import type { CodeChange, DesignChange, LayerSync, SyncJob } from '../../shared/protocol';
+import { exportSVG, type EditorNode, type Store } from '../../../../editor/src/index.js';
+import type { CodeChange, DesignChange, LayerSync, ProposalScope, SyncJob } from '../../shared/protocol';
 import { acceptChanges, applySnap, ensureBaselines, filesFor, isLinked, labelFor, measurableLayers, mergeFromCode, pendingChanges, snapshot, stylesToSnap, syncOf, type IncomingChange, type Snap } from './model';
 
 export interface SyncDeps {
@@ -125,10 +125,19 @@ export class SyncController {
   }
 
   /** Sends canvas edits (all pending layers, or the ones given) to Claude Code. */
-  async sendToCode(layerIds?: string[]) {
-    const layers = this.pending().filter((l) => !layerIds || layerIds.includes(l.layerId));
+  async sendToCode(layerIds?: string[], scopes: Record<string, { scope: ProposalScope; token?: string }> = {}) {
+    const layers = this.pending().filter((l) => !layerIds || layerIds.includes(l.layerId))
+      .map((l) => ({ ...l, ...scopes[l.layerId] }));
     if (!layers.length) throw new Error('There are no canvas changes to send to code.');
-    const job = await this.d.api<SyncJob>('/api/sync/to-code', { layers });
+    const designIds = layers.filter((layer) => layer.kind === 'design').map((layer) => layer.layerId);
+    const targetSvg = designIds.length ? exportSVG(this.store, designIds) : undefined;
+    const job = await this.d.api<SyncJob>('/api/sync/to-code', { layers, targetSvg });
+    this.onJob(job);
+    return job;
+  }
+
+  async verify(id: string) {
+    const job = await this.d.api<SyncJob>('/api/sync/verify', { id });
     this.onJob(job);
     return job;
   }

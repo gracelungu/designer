@@ -203,7 +203,7 @@ async function writeRecipe(cwd: string, r: RunRecipe) {
   await writeFile(join(cwd, RECIPE_FILE), JSON.stringify(r, null, 2) + '\n');
 }
 
-const sub = (s: string, port: number) => s.replace(/\$\{?PORT\}?/g, String(port));
+export const substitutePort = (s: string, port: number) => s.replace(/\$\{?PORT\}?/g, String(port));
 
 /** What a tool call looks like in the activity list. */
 export function describeActivity(name: string, input: Record<string, unknown>, cwd: string): { kind: SetupActivity['kind']; text: string } | undefined {
@@ -384,9 +384,9 @@ export class ProjectRunner {
     const port = await freePort();
     if (run.cancelled) throw new Error('The preview was cancelled.');
     const env: Record<string, string> = { PORT: String(port), BROWSER: 'none', NO_COLOR: '1' };
-    for (const [k, v] of Object.entries(a.env ?? {})) env[k] = sub(String(v), port);
-    const command = sub(a.command, port);
-    const url = await dev.start(dir, command, env, a.url ? sub(a.url, port) : undefined);
+    for (const [k, v] of Object.entries(a.env ?? {})) env[k] = substitutePort(String(v), port);
+    const command = substitutePort(a.command, port);
+    const url = await dev.start(dir, command, env, a.url ? substitutePort(a.url, port) : undefined);
     if (run.cancelled) return { url, answer: '' };
     const probe = a.kind === 'storybook' ? `${url}/index.json` : url;
     const answer = await fetch(probe, { signal: AbortSignal.timeout(30000) }).then(

@@ -1,8 +1,10 @@
 import { useState, useSyncExternalStore } from 'react';
-import type { DesignChange, LayerSync } from '../../shared/protocol';
+import type { DesignChange, LayerSync, ProposalScope, SyncJob } from '../../shared/protocol';
 import type { SyncController } from '../sync/controller';
 import { syncOf } from '../sync/model';
+import { reviewImage } from '../api';
 import { FileDiff } from './Changes';
+import { ReviewViewer } from './VisualReview';
 
 export function useSync(sync: SyncController) {
   useSyncExternalStore(
@@ -68,11 +70,100 @@ export function SyncBar({ sync, onOpen }: { sync: SyncController; onOpen: () => 
   );
 }
 
+const scopes: Record<ProposalScope, string> = {
+  example: 'This example',
+  component: 'Component default',
+  token: 'Shared token',
+};
+
+const defaultScope = (l: LayerSync) => (l.kind === 'component' ? 'example' : 'component') as ProposalScope;
+
+function targetImage(svg?: string) {
+  if (svg) {
+    try { return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`; } catch { /* malformed Unicode */ }
+  }
+}
+
+function ProposalEvidence({ job, busy, onVerify }: { job: SyncJob; busy: boolean; onVerify: () => void }) {
+  const [expanded, setExpanded] = useState(false);
+  const target = targetImage(job.targetSvg);
+  const commands = job.plan && [...job.plan.prepare, ...(job.plan.preview ? [job.plan.preview] : []), ...job.plan.checks];
+  return (
+    <>
+      {job.layers.map((l) => (
+        <div key={l.layerId} className="proposal-intent">
+          <b>{l.name} · {scopes[l.scope ?? defaultScope(l)]}{l.token ? ` · ${l.token}` : ''}</b>
+          <ChangeList changes={l.changes} />
+        </div>
+      ))}
+      {target && (
+        <figure className="proposal-image">
+          <figcaption>Design target</figcaption>
+          <img alt="Canvas design target at proposal time" src={target} />
+        </figure>
+      )}
+      {!!job.references?.length && (
+        <details>
+          <summary>Possible affected source references ({job.references.length})</summary>
+          <p className="faint">Text matches in tracked files. Runtime usage may differ.</p>
+          <ul>{job.references.map((path) => <li className="mono" key={path}>{path}</li>)}</ul>
+        </details>
+      )}
+      {!!commands?.length && (
+        <details className="proposal-plan" open>
+          <summary>Project commands</summary>
+          <p className="faint">Review the commands before running them. They execute locally in temporary copies of this project.</p>
+          <ul>{commands.map((c, i) => <li className="mono" key={i}>{c.cwd} · {c.command}</li>)}</ul>
+          {job.plan?.preview && <p className="faint">Preview routes: {job.plan.routes.join(', ')}</p>}
+          <button className="btn small" disabled={busy || job.verifying} onClick={onVerify}>
+            {job.verifying ? 'Running preview and checks…' : job.evidence ? 'Run again' : 'Run preview and checks'}
+          </button>
+        </details>
+      )}
+      {!job.evidence && !job.verifying && (
+        <p className="faint">{commands?.length ? 'Preview and checks have not been run.' : 'The agent did not find project commands. Review the diff manually.'}</p>
+      )}
+      {job.evidence && (
+        <>
+          {job.evidence.note && <p className="faint">{job.evidence.note}</p>}
+          {job.evidence.shots.some((shot) => shot.before || shot.after) && (
+            <button type="button" className="btn small" onClick={() => setExpanded(true)}>Open visual comparison</button>
+          )}
+          {expanded && <ReviewViewer review={job.evidence} onClose={() => setExpanded(false)} transient />}
+          {job.evidence.proposal?.checks.map((check, i) => (
+            <details key={i}>
+              <summary>{check.status === 'passed' ? 'Passed' : check.status === 'failed' ? 'Failed' : 'Skipped'} · <code>{check.command}</code></summary>
+              {check.detail && <pre className="proposal-output">{check.detail}</pre>}
+            </details>
+          ))}
+          {job.evidence.shots.map((shot) => (
+            <div key={shot.key}>
+              <b className="mono">{shot.label}</b>
+              <div className="proposal-comparison">
+                {(['before', 'after'] as const).map((phase) => {
+                  const file = shot[phase];
+                  return file && <figure key={phase} className="proposal-image">
+                    <figcaption>{phase === 'before' ? 'Current code' : 'Proposed code'}</figcaption>
+                    <img alt={`${shot.label} ${phase}`} src={reviewImage(job.id, file, String(job.evidence?.createdAt ?? ''))} />
+                  </figure>;
+                })}
+              </div>
+              {shot.error && <p className="faint">{shot.error}</p>}
+            </div>
+          ))}
+        </>
+      )}
+    </>
+  );
+}
+
 /** Design ↔ code: canvas edits to send, code changes to review, and code updates that reached the canvas. */
 export function SyncPanel({ sync, agentReady, onClose, onSelect }: { sync: SyncController; agentReady: boolean; onClose: () => void; onSelect: (id: string) => void }) {
   const { pending, active, incoming, updates, checking } = useSync(sync);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [selectedScopes, setSelectedScopes] = useState<Record<string, { scope: ProposalScope; token?: string }>>({});
+  const scopeReady = (l: LayerSync) => selectedScopes[l.layerId]?.scope !== 'token' || !!selectedScopes[l.layerId]?.token?.trim();
   const [copied, setCopied] = useState('');
   const running = active.some((j) => j.status === 'running');
   const act = async (fn: () => Promise<unknown>) => {
@@ -89,8 +180,9 @@ export function SyncPanel({ sync, agentReady, onClose, onSelect }: { sync: SyncC
   const copy = async (layer: LayerSync) => {
     const target = [layer.file, layer.exportName, layer.storyId].filter(Boolean).join(' · ');
     const changes = layer.changes.map((c) => `- ${c.label}: ${show(c.from)} → ${show(c.to)}${c.css ? ` (${c.css})` : ''}`);
-    const scope = layer.kind === 'component' ? 'Update the story defaults' : 'Update the component';
-    await navigator.clipboard.writeText([`${scope} for ${layer.name}`, target, '', ...changes].join('\n'));
+    const chosen = selectedScopes[layer.layerId];
+    const scope = scopes[chosen?.scope ?? defaultScope(layer)];
+    await navigator.clipboard.writeText([`${scope}: ${layer.name}${chosen?.token ? ` · ${chosen.token}` : ''}`, target, '', ...changes].join('\n'));
     setCopied(layer.layerId);
   };
   const recent = [...sync.jobs.values()].filter((j) => j.status === 'failed' || j.status === 'kept' || j.status === 'discarded').sort((a, b) => b.createdAt - a.createdAt).slice(0, 3);
@@ -119,13 +211,14 @@ export function SyncPanel({ sync, agentReady, onClose, onSelect }: { sync: SyncC
           ) : (
             <>
               <div className="sync-card-head">Review the proposed diff</div>
+              <ProposalEvidence job={job} busy={busy} onVerify={() => void act(() => sync.verify(job.id))} />
               {job.summary && <div className="sync-summary">{job.summary}</div>}
               {job.files.map((f) => (
                 <FileDiff key={f.path} path={f.path} before={f.before ?? ''} after={f.after} />
               ))}
               <div className="cp-actions">
-                <button className="btn primary" disabled={busy} onClick={() => act(() => sync.keep(job.id))}>Apply to checkout</button>
-                <button className="btn" disabled={busy} onClick={() => act(() => sync.discard(job.id))}>Discard proposal</button>
+                <button className="btn primary" disabled={busy || job.verifying} onClick={() => act(() => sync.keep(job.id))}>Apply to checkout</button>
+                <button className="btn" disabled={busy || job.verifying} onClick={() => act(() => sync.discard(job.id))}>Discard proposal</button>
               </div>
             </>
           )}
@@ -160,7 +253,7 @@ export function SyncPanel({ sync, agentReady, onClose, onSelect }: { sync: SyncC
       <div className="section-title">
         Canvas edits
         {agentReady && pending.length > 1 && (
-          <button className="btn small primary" disabled={running || busy} onClick={() => act(() => sync.sendToCode())}>Propose all</button>
+          <button className="btn small primary" disabled={running || busy || !pending.every(scopeReady)} onClick={() => act(() => sync.sendToCode(undefined, selectedScopes))}>Propose all</button>
         )}
       </div>
       {pending.length === 0 && <div className="empty">Edits to linked layers appear here. Copy the changes for implementation or review a proposed diff.</div>}
@@ -169,10 +262,20 @@ export function SyncPanel({ sync, agentReady, onClose, onSelect }: { sync: SyncC
           <button className="sync-layer" onClick={() => onSelect(l.layerId)}>
             {l.name} <span className="faint mono">{l.file ?? l.storyId}</span>
           </button>
-          <div className="faint">{l.kind === 'component' ? 'Canvas instance overrides. A proposal updates the story defaults.' : 'Edits to the linked design layer.'}</div>
+          <label className="field">
+            <span>Change scope</span>
+            <select className="input" value={selectedScopes[l.layerId]?.scope ?? defaultScope(l)}
+              onChange={(e) => setSelectedScopes((all) => ({ ...all, [l.layerId]: { scope: e.target.value as ProposalScope, token: all[l.layerId]?.token } }))}>
+              {Object.entries(scopes).map(([id, name]) => <option value={id} key={id}>{name}</option>)}
+            </select>
+          </label>
+          {selectedScopes[l.layerId]?.scope === 'token' && (
+            <label className="field"><span>Token name</span><input className="input" maxLength={120} value={selectedScopes[l.layerId]?.token ?? ''}
+              onChange={(e) => setSelectedScopes((all) => ({ ...all, [l.layerId]: { scope: 'token', token: e.target.value } }))} /></label>
+          )}
           <ChangeList changes={l.changes} />
           <div className="cp-actions">
-            {agentReady && <button className="btn primary" disabled={running || busy} onClick={() => act(() => sync.sendToCode([l.layerId]))}>{l.kind === 'component' ? 'Propose story defaults' : 'Propose code change'}</button>}
+            {agentReady && <button className="btn primary" disabled={running || busy || !scopeReady(l)} onClick={() => act(() => sync.sendToCode([l.layerId], selectedScopes))}>Propose code change</button>}
             <button className="btn" disabled={busy} onClick={() => act(() => copy(l))}>{copied === l.layerId ? 'Copied' : 'Copy changes'}</button>
             {l.kind === 'design' && <button className="btn ghost" onClick={() => sync.markImplemented(l)}>Mark implemented</button>}
             <button className="btn ghost" onClick={() => sync.revert(l.layerId)}>{l.kind === 'component' ? 'Reset overrides' : 'Revert design'}</button>

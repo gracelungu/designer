@@ -54,7 +54,12 @@ export function VisualChanges({ reviews, onOpen }: { reviews: VisualReview[]; on
 type Mode = 'side' | 'slider' | 'highlight';
 
 /** Full-size before / after for one change: side by side, a slider to wipe between them, or the changed pixels in red. */
-export function ReviewViewer({ review, onClose, onAsk }: { review: VisualReview; onClose: () => void; onAsk?: (prompt: string) => void }) {
+export function ReviewViewer({ review, onClose, onAsk, transient = false }: {
+  review: VisualReview;
+  onClose: () => void;
+  onAsk?: (prompt: string) => void;
+  transient?: boolean;
+}) {
   const [r, setR] = useState(review);
   const [i, setI] = useState(() => Math.max(0, review.shots.findIndex((s) => s.diff)));
   const [mode, setMode] = useState<Mode>('side');
@@ -86,6 +91,9 @@ export function ReviewViewer({ review, onClose, onAsk }: { review: VisualReview;
           <button className="toast-close dark" aria-label="Close" onClick={onClose}>×</button>
         </div>
         {r.note && <p className="muted">{r.note}</p>}
+        {!!r.proposal?.checks.length && <ul>
+          {r.proposal.checks.map((check, idx) => <li key={idx}>{check.status} · <code>{check.command}</code></li>)}
+        </ul>}
         {r.shots.length > 1 && (
           <div className="review-tabs">
             {r.shots.map((s, k) => (
@@ -142,8 +150,8 @@ export function ReviewViewer({ review, onClose, onAsk }: { review: VisualReview;
           {onAsk && shot && (
             <button className="btn" onClick={() => (onAsk(`About the change "${r.title}" to ${shot.label}: `), onClose())}>Ask Claude about this</button>
           )}
-          <button className="btn" onClick={() => void api('/api/visual-reviews/remove', { id: r.id }).then(onClose)}>Dismiss</button>
-          <button className="btn" onClick={retake} disabled={busy}>{busy ? 'Taking pictures…' : 'Retake after'}</button>
+          {!transient && <button className="btn" onClick={() => void api('/api/visual-reviews/remove', { id: r.id }).then(onClose)}>Dismiss</button>}
+          {!r.proposal && <button className="btn" onClick={retake} disabled={busy}>{busy ? 'Taking pictures…' : 'Retake after'}</button>}
         </div>
       </div>
     </div>
@@ -175,7 +183,7 @@ export function SendForReview({
   /** Writes the design preview (frames, comments, specs) into the project before sending. */
   onPreview?: () => Promise<unknown>;
 }) {
-  const pending = reviews.filter((r) => !r.sentIn && r.shots.length);
+  const pending = reviews.filter((r) => !r.sentIn && (r.shots.length || r.proposal));
   const [title, setTitle] = useState(() => pending[0]?.title ?? '');
   const [description, setDescription] = useState('');
   const [picked, setPicked] = useState<Set<string>>(() => new Set(pending.map((r) => r.id)));
@@ -230,7 +238,7 @@ export function SendForReview({
             )}
             {pending.length > 0 ? (
               <div className="field">
-                <span>Pictures to include</span>
+                <span>Reviews to include</span>
                 {pending.map((r) => {
                   const lead = r.shots.find((s) => s.diff) ?? r.shots.find((s) => s.after);
                   return (

@@ -91,7 +91,10 @@ export async function startServer(opts: ServerOptions = {}) {
     },
   });
   // Design -> code jobs, and the watcher that tells the canvas when code changed under it.
+  const shooter = opts.shooter ?? new Camera();
   const codeSync = new CodeSync({
+    shooter,
+    review: (review) => broadcast({ type: 'review', review }),
     claudePath: () => (claude.found && claude.loggedIn !== false ? claude.path : undefined),
     cwd: () => requireProject(),
     send: (job) => broadcast({ type: 'sync', job }),
@@ -99,7 +102,6 @@ export async function startServer(opts: ServerOptions = {}) {
   });
   const headWatcher = new HeadWatcher((change) => broadcast({ type: 'code-changed', change }));
   if (opts.initialProject) void headWatcher.watch(opts.initialProject);
-  const shooter = opts.shooter ?? new Camera();
   const visualReviews = new ReviewManager({
     project: () => projectPath,
     shooter,
@@ -451,9 +453,10 @@ export async function startServer(opts: ServerOptions = {}) {
     'GET /api/sync': async () => codeSync.list(projectPath),
     'POST /api/sync/to-code': async (body) => {
       requireProject();
-      return codeSync.start((body.layers ?? []) as LayerSync[]);
+      return codeSync.start((body.layers ?? []) as LayerSync[], typeof body.targetSvg === 'string' ? body.targetSvg : undefined);
     },
-    'POST /api/sync/keep': async (body) => codeSync.keep(String(body.id)),
+    'POST /api/sync/verify': async (body) => codeSync.verify(String(body.id)),
+    'POST /api/sync/keep': async (body) => gitOperation(() => codeSync.keep(String(body.id))),
     'POST /api/sync/discard': async (body) => codeSync.discard(String(body.id)),
     'POST /api/git/save': async (body) => gitOperation(async () => saveVersion(requireProject(), String(body.message ?? ''))),
     'POST /api/git/share': async (body) => gitOperation(async () => shareForReview(requireProject(), String(body.title ?? ''), { preview: !!body.preview })),
@@ -464,7 +467,7 @@ export async function startServer(opts: ServerOptions = {}) {
       return { ok: true };
     },
     'GET /api/visual-reviews/camera': async () => ({ available: shooter.available, reason: shooter.reason ?? null }),
-    'POST /api/git/send': async (body) => {
+    'POST /api/git/send': async (body) => gitOperation(async () => {
       const cwd = requireProject();
       const all = await visualReviews.list();
       const ids = Array.isArray(body.reviewIds) ? (body.reviewIds as string[]) : all.filter((r) => !r.sentIn).map((r) => r.id);
@@ -478,10 +481,10 @@ export async function startServer(opts: ServerOptions = {}) {
         gh: opts.gh,
         preview: !!body.preview,
       });
-      if (r.ok && r.url) for (const v of chosen) await visualReviews.update(v.id, { sentIn: r.url }).catch(() => undefined);
+      if (r.ok && r.url && !r.needsConfirm) for (const id of r.reviewIds ?? chosen.map((v) => v.id)) await visualReviews.update(id, { sentIn: r.url }).catch(() => undefined);
       broadcast({ type: 'project', project: await projectInfo(cwd) });
       return r;
-    },
+    }),
     'GET /api/git/workspace': async () => workspaceTracking(requireProject()),
     'POST /api/git/workspace': async (body) => gitOperation(async () => {
       const cwd = requireProject();
