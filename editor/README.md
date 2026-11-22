@@ -10,14 +10,18 @@ Run it with any static server from this folder, for example `npx http-server edi
 - **Selection:** click, Shift+click, marquee, Cmd+click for the deepest layer, double-click to go into groups, Enter and Shift+Enter for children and parent, Tab between siblings. Children of top-level frames are picked directly, like Figma.
 - **Transform:** move with smart guides and snapping to edges and centres, whole-pixel positions, Shift to lock an axis, Alt-drag to duplicate; resize from corners and edges (Shift keeps proportions, Alt from the centre), rotate just outside a corner (Shift for 15°), line endpoints, flips, nudging with arrows.
 - **Structure:** group and ungroup, frame selection, drag into and out of frames, drawing a frame around layers adopts them, constraints when a frame resizes, layer ordering, hide and lock.
-- **Auto layout:** Shift+A, direction, gap or auto spacing, padding, 3×3 alignment, hug, fill and fixed sizing, reordering by dragging inside the frame.
-- **Properties:** position, size, rotation, constraints, clip content, opacity, corner radius (per corner), polygon and star points, text (font, weight, size, line height, letter spacing, alignment, auto width or height, decoration, case), fills (solid or image), strokes (weight, inside, centre or outside, dashes, arrow ends), drop shadow, inner shadow and layer blur. Number fields scrub by dragging their label and accept maths.
+- **Auto layout:** Shift+A, direction, gap or auto spacing, padding, 3×3 alignment, hug, fill and fixed sizing, reordering by dragging inside the frame, and horizontal wrapping with a separate row gap.
+- **Properties:** position, size, rotation, constraints, clip content, opacity, corner radius (per corner), polygon and star points, text (font, weight, size, line height, letter spacing, alignment, auto width or height, decoration, case), fills (solid, image, linear gradient or radial gradient on nontext layers), strokes (weight, inside, centre or outside, dashes, arrow ends), drop shadow, inner shadow and layer blur. Number fields scrub by dragging their label and accept maths.
 - **Layers panel:** tree, multi-select, rename (double-click or Cmd+R), drag to reorder or nest, hide and lock.
-- **Also:** undo and redo for everything, copy and paste (also between tabs as JSON), copy and paste properties, Alt to measure distances, zoom (Cmd+scroll, Shift+0, 1, 2), comments with replies and resolve, SVG export, an Inspect tab with CSS, a context menu and a shortcut sheet (Shift+?).
+- **Prototyping:** select a layer inside a top level frame, open Prototype, and choose a click action. Play from any frame or a selected start frame. The player renders editable artwork with static placeholders for live source previews.
+- **Quick actions:** Cmd/Ctrl + / opens a searchable list of tools and commands.
+- **Also:** undo and redo for everything, copy and paste (also between tabs as JSON), copy and paste properties, Alt to measure distances, zoom (Cmd+scroll, Shift+0, 1, 2), comments with replies and resolve, SVG, PNG and JPG export, an Inspect tab with CSS, a context menu and a shortcut sheet (Shift+?).
 
 ## Not done yet
 
-Vector boolean operations and outline stroke, editing rectangle or ellipse points (vector editing works on pen and pencil paths), components and variants, variables and styles, prototyping links, multiple pages, rich text runs (styles apply to the whole text layer), gradients, background blur, PNG export, rulers and layout grids, and auto layout wrap.
+Vector boolean operations and outline stroke, editing rectangle or ellipse points (vector editing works on pen and pencil paths), components and variants, variables and styles, advanced prototype actions and transitions, multiple pages, rich text runs (styles apply to the whole text layer), additional gradient types, background blur, PDF export, rulers and layout grids, and vertical auto layout wrap.
+
+See the [Figma parity audit](../docs/figma-parity-audit.md) for the editor and enterprise comparison.
 
 ## Layout of the code
 

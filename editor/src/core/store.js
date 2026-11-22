@@ -351,13 +351,15 @@ export class Store {
   }
   /** Inserts cloned nodes with fresh ids. Returns new root ids. */
   insertClones(list, parentId, index = null) {
-    const map = {};
+    const map = Object.create(null);
     for (const n of list) map[n.id] = uid();
     const ids = new Set(list.map((n) => n.id));
     const roots = [];
     for (const src of list) {
       const n = JSON.parse(JSON.stringify(src));
       n.id = map[src.id];
+      const action = n.prototypeAction;
+      if (action?.type === 'navigate' && map[action.target]) action.target = map[action.target];
       if (n.children) n.children = n.children.filter((c) => map[c]).map((c) => map[c]);
       if (src.parent && ids.has(src.parent)) {
         n.parent = map[src.parent];

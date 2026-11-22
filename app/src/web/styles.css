@@ -85,7 +85,6 @@ select.input { padding: 0 4px; }
 .empty { padding: 16px 12px; color: var(--muted); line-height: 1.55; }
 .hint { padding: 0 12px 8px; color: var(--muted); line-height: 1.5; }
 .layers-host, .props-host { min-height: 0; }
-.props-host .dz-tabs { display: none; }
 .pane > div > .layers-host { height: 100%; overflow: auto; }
 
 /* ---------- Canvas ---------- */

@@ -37,6 +37,11 @@ export function layoutNode(store, id) {
   const size = (c) => store.parentSpaceBox(c);
   const isFill = (c, ax) => c.sizing?.[ax] === 'fill' && !c.rotation;
 
+  if (wraps(n)) {
+    layoutWrapped(store, n, kids);
+    return;
+  }
+
   const fillMain = hugMain ? [] : kids.filter((c) => isFill(c, mainAxis));
   const fixedKids = kids.filter((c) => !fillMain.includes(c));
   const fixedSum = fixedKids.reduce((s, c) => s + size(c)[M], 0);
@@ -90,6 +95,92 @@ export function layoutNode(store, id) {
     store.moveBy(c.id, horiz ? dMain : dCross, horiz ? dCross : dMain);
     cursor += b[M] + gap;
   });
+}
+
+const wraps = (frame) => frame.layout.mode === 'horizontal' && frame.layout.wrap && frame.sizing?.h !== 'hug';
+const offset = (alignment, free) => alignment === 'center' ? free / 2 : alignment === 'end' ? free : 0;
+const fills = (n, axis) => n.sizing?.[axis] === 'fill' && !n.rotation;
+
+function wrappedRows(store, frame, kids) {
+  const { padding, primary } = frame.layout;
+  const gap = primary === 'space-between' ? 0 : frame.layout.gap;
+  const available = Math.max(0, frame.w - padding.l - padding.r);
+  const rows = [];
+  let row;
+  for (const child of kids) {
+    const box = store.parentSpaceBox(child);
+    const width = fills(child, 'h') ? Math.max(1, available) : box.w;
+    if (!row || row.width + gap + width > available + 0.001) {
+      row = { items: [], width: 0 };
+      rows.push(row);
+    }
+    if (row.items.length) row.width += gap;
+    row.items.push(child);
+    row.width += width;
+  }
+  return rows;
+}
+
+function layoutWrapped(store, frame, kids) {
+  const L = frame.layout;
+  const p = L.padding;
+  const available = Math.max(0, frame.w - p.l - p.r);
+  const rowGap = L.rowGap ?? L.gap;
+  let y = frame.y + p.t;
+  for (const { items, width } of wrappedRows(store, frame, kids)) {
+    for (const child of items) {
+      if (!fills(child, 'h')) continue;
+      const width = Math.max(1, available);
+      if (child.w !== width) setBox(store, child.id, { x: child.x, y: child.y, w: width, h: child.h });
+      if (child.type === 'text' && child.text.autoResize !== 'fixed') {
+        child.text.autoResize = 'height';
+        if (store.measureText) child.h = store.measureText(child, child.w).h;
+      }
+      layoutNode(store, child.id);
+    }
+    const autoSpace = L.primary === 'space-between';
+    const used = autoSpace ? width : width - L.gap * (items.length - 1);
+    const gap = autoSpace && items.length > 1 ? Math.max(0, (available - used) / (items.length - 1)) : L.gap;
+    const fixedHeights = items.filter((child) => !fills(child, 'v')).map((child) => store.parentSpaceBox(child).h);
+    const height = Math.max(1, ...(fixedHeights.length ? fixedHeights : items.map((child) => store.parentSpaceBox(child).h)));
+    let x = frame.x + p.l + offset(L.primary, available - width);
+    for (const child of items) {
+      if (fills(child, 'v') && child.h !== height) {
+        setBox(store, child.id, { x: child.x, y: child.y, w: child.w, h: height });
+        if (child.type === 'text') child.text.autoResize = 'fixed';
+        layoutNode(store, child.id);
+      }
+      const box = store.parentSpaceBox(child);
+      store.moveBy(child.id, x - box.x, y + offset(L.counter, height - box.h) - box.y);
+      x += box.w + gap;
+    }
+    y += height + rowGap;
+  }
+  if (frame.sizing?.v === 'hug') frame.h = p.t + p.b + (kids.length ? y - frame.y - p.t - rowGap : 0);
+}
+
+/** Finds an insertion point and its guide for wrapping frames. */
+export function wrappedInsertion(store, frame, p, excludeIds) {
+  if (!wraps(frame)) return null;
+  const full = frame.children.filter((id) => !excludeIds.includes(id));
+  const kids = full.map((id) => store.get(id)).filter((n) => n?.visible && !n.absolute);
+  const rows = wrappedRows(store, frame, kids);
+  let nearest;
+  for (const { items } of rows) {
+    const boxes = items.map((n) => store.parentSpaceBox(n));
+    const top = Math.min(...boxes.map((b) => b.y));
+    const bottom = Math.max(...boxes.map((b) => b.y + b.h));
+    const distance = Math.max(0, top - p.y, p.y - bottom);
+    if (!nearest || distance < nearest.distance) nearest = { items, boxes, top, bottom, distance };
+  }
+  if (!nearest) return null;
+  const { items, boxes, top, bottom } = nearest;
+  const before = boxes.findIndex((b) => p.x < b.x + b.w / 2);
+  const nextRow = kids[kids.indexOf(items.at(-1)) + 1];
+  const next = before === -1 ? nextRow : items[before];
+  const last = boxes.at(-1);
+  const x = before === -1 ? last.x + last.w : boxes[before].x;
+  return { index: next ? full.indexOf(next.id) : full.length, x, top, bottom };
 }
 
 /** Index a dragged child should take inside an auto layout frame for a pointer position (frame space). */

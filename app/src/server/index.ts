@@ -1,6 +1,6 @@
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { createReadStream, existsSync } from 'node:fs';
-import { mkdir, readFile, realpath, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { homedir } from 'node:os';
 import { dirname, extname, join, normalize, resolve } from 'node:path';
@@ -503,7 +503,13 @@ export async function startServer(opts: ServerOptions = {}) {
       // Comments are saved one file per thread (see /api/comments), so they merge cleanly in git.
       const data = body.data as { doc?: Record<string, unknown> } | null;
       const doc = data?.doc ? { ...data.doc, comments: [] } : undefined;
-      await writeFile(f, JSON.stringify(data ? { ...data, ...(doc ? { doc } : {}) } : null, null, 1));
+      const temp = `${f}.${randomUUID()}.tmp`;
+      try {
+        await writeFile(temp, JSON.stringify(data ? { ...data, ...(doc ? { doc } : {}) } : null, null, 1), { flag: 'wx' });
+        await rename(temp, f);
+      } finally {
+        await rm(temp, { force: true });
+      }
       return { ok: true, path: f };
     },
     'GET /api/comments': async () => ({ comments: await readComments(designerDir()), author: await commentAuthor(projectPath) }),
@@ -585,14 +591,19 @@ export async function startServer(opts: ServerOptions = {}) {
     if (req.headers['x-designer-token'] !== token) return json(res, 403, { error: 'Missing or wrong token' });
     const route = routes[`${req.method} ${url.pathname}`];
     if (!route) return json(res, 404, { error: 'Not found' });
-    let body: Record<string, unknown> = {};
-    if (req.method === 'POST') {
-      const chunks: Buffer[] = [];
-      for await (const c of req) chunks.push(c as Buffer);
-      const raw = Buffer.concat(chunks).toString() || '{}';
-      body = JSON.parse(raw) as Record<string, unknown>;
-    }
     try {
+      let body: Record<string, unknown> = {};
+      if (req.method === 'POST') {
+        const chunks: Buffer[] = [];
+        for await (const c of req) chunks.push(c as Buffer);
+        try {
+          const value: unknown = JSON.parse(Buffer.concat(chunks).toString() || '{}');
+          if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error();
+          body = value as Record<string, unknown>;
+        } catch {
+          throw new HttpError(400, 'Expected a JSON request object');
+        }
+      }
       json(res, 200, await route(body, url));
     } catch (e) {
       const status = e instanceof HttpError ? e.status : 500;

@@ -4,6 +4,7 @@
 import { existsSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { PNG } from 'pngjs';
 import { chromium, type Browser, type Page } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { startServer } from '../../src/server/index';
@@ -141,6 +142,101 @@ describe('canvas', () => {
 
   it('saves the canvas into the project', async () => {
     await expect.poll(() => existsSync(join(workspace, 'Lumen demo', '.designer', 'canvas.json')), { timeout: 10000 }).toBe(true);
+  });
+});
+
+describe('design and prototype inspector', () => {
+  it('edits fills and layout, plays local interactions, and reopens the saved prototype', async () => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), 'designer-prototype-')));
+    const bare = await startServer({ workspace: dir, staticDir: STATIC });
+    let p: Page | undefined;
+    try {
+      p = await openPage(bare.url);
+      p.setDefaultTimeout(5000);
+      await p.getByRole('button', { name: 'Start with a blank canvas', exact: true }).click();
+      await p.locator('.dz-canvas').waitFor();
+      const hotspotId = await p.evaluate(() => {
+        const { store } = (window as unknown as { __designer: { host: { editor: { store: import('../../../editor/src/index.js').Store } } } }).__designer.host.editor;
+        return store.transact(() => {
+          const first = store.create('frame', { name: 'Welcome screen', w: 240, h: 140 });
+          const next = store.create('frame', { name: 'Details screen', x: 260, w: 240, h: 140 });
+          const hotspot = store.create('rect', { name: 'View details', x: 20, y: 30, w: 80, h: 36 }, first.id);
+          store.create('rect', { name: 'Go to welcome', x: 280, y: 35, w: 100, h: 40 }, next.id);
+          const title = store.create('text', { name: 'Label', x: 25, y: 80 }, first.id);
+          title.text.content = 'Pick an option';
+          store.select([hotspot.id]);
+          return hotspot.id;
+        });
+      });
+      const inspector = p.locator('.props-host');
+      const design = inspector.getByRole('button', { name: 'Design', exact: true });
+      const prototype = inspector.getByRole('button', { name: 'Prototype', exact: true });
+      await inspector.getByLabel('Fill type').selectOption('linear');
+      await inspector.getByRole('button', { name: 'Add stop' }).click();
+      await inspector.getByLabel('Stop 3 position').waitFor();
+      await prototype.click();
+      await inspector.getByLabel('On click action').selectOption('navigate');
+      await inspector.getByLabel('Destination frame').selectOption({ label: 'Details screen' });
+      await p.locator('.dz-canvas').focus();
+      await p.keyboard.press('ControlOrMeta+/');
+      const quickActions = p.getByRole('dialog', { name: 'Quick actions' });
+      await quickActions.getByRole('combobox', { name: 'Search commands' }).fill('play proto');
+      await quickActions.getByRole('option', { name: 'Play prototype' }).waitFor();
+      await p.keyboard.press('Enter');
+      const preview = p.getByRole('dialog', { name: 'Prototype preview' });
+      await preview.getByRole('button', { name: 'View details' }).press('Enter');
+      await preview.getByText('Details screen', { exact: true }).waitFor();
+      await preview.getByRole('button', { name: 'Back', exact: true }).click();
+      await preview.getByText('Welcome screen', { exact: true }).waitFor();
+      await p.keyboard.press('Escape');
+      await preview.waitFor({ state: 'detached' });
+
+      await p.getByRole('button', { name: 'Layers', exact: true }).click();
+      await p.getByRole('tree').getByText('Welcome screen', { exact: true }).click();
+      await design.click();
+      await inspector.getByLabel('Export format').selectOption('png');
+      await inspector.getByLabel('Export scale').selectOption('2');
+      const [download] = await Promise.all([
+        p.waitForEvent('download', { timeout: 5000 }),
+        inspector.getByRole('button', { name: 'Export PNG', exact: true }).click(),
+      ]);
+      const png = PNG.sync.read(readFileSync(await download.path()));
+      expect([png.width, png.height]).toEqual([480, 280]);
+      expect(png.data[3]).toBe(255);
+      let inkPixels = 0;
+      for (let y = 160; y < 200; y++) {
+        for (let x = 50; x < 280; x++) {
+          if (png.data[(y * png.width + x) * 4] < 60) inkPixels++;
+        }
+      }
+      expect(inkPixels).toBeGreaterThan(50);
+      await inspector.getByLabel('Export format').selectOption('jpg');
+      const [jpeg] = await Promise.all([
+        p.waitForEvent('download', { timeout: 5000 }),
+        inspector.getByRole('button', { name: 'Export JPG', exact: true }).click(),
+      ]);
+      expect(readFileSync(await jpeg.path()).subarray(0, 3)).toEqual(Buffer.from([0xff, 0xd8, 0xff]));
+      await inspector.getByRole('button', { name: 'Add auto layout' }).click();
+      await inspector.getByRole('button', { name: 'Horizontal layout' }).click();
+      await inspector.getByRole('checkbox', { name: 'Wrap rows' }).check();
+      await inspector.getByLabel('Row gap', { exact: true }).waitFor();
+      const persisted = async () => {
+        const res = await fetch(`${bare.url}/api/canvas`, { headers: { 'x-designer-token': bare.token } });
+        const { data } = await res.json() as { data: { doc: { nodes: Record<string, { prototypeAction?: { type: string }; layout?: { wrap?: boolean }; name: string }> } } | null };
+        if (!data) return false;
+        return data.doc.nodes[hotspotId]?.prototypeAction?.type === 'navigate' &&
+          Object.values(data.doc.nodes).find((n) => n.name === 'Welcome screen')?.layout?.wrap === true;
+      };
+      await expect.poll(persisted).toBe(true);
+      await p.reload();
+      await prototype.click();
+      await inspector.getByRole('button', { name: 'Play prototype' }).click();
+      await preview.getByRole('button', { name: 'View details' }).click();
+      await preview.getByText('Details screen', { exact: true }).waitFor();
+    } finally {
+      await p?.context().close();
+      bare.close();
+    }
   });
 });
 

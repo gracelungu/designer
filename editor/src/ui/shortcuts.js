@@ -2,6 +2,7 @@
 
 import * as C from '../core/commands.js';
 import { showMenu, closeMenu, toast } from './dom.js';
+import { showQuickActions } from './quick-actions.js';
 import { hitTest } from '../core/hittest.js';
 import { pickTarget } from '../tools/select.js';
 
@@ -34,7 +35,7 @@ export const SHORTCUTS = [
   ]],
   ['View', [
     ['Zoom in / out', 'Mod + / Mod -'], ['Zoom to 100%', 'Shift 0'], ['Zoom to fit', 'Shift 1'], ['Zoom to selection', 'Shift 2'],
-    ['Zoom with the wheel', 'Mod scroll'], ['Pan', 'Space drag'],
+    ['Zoom with the wheel', 'Mod scroll'], ['Pan', 'Space drag'], ['Quick actions', 'Mod /'],
   ]],
   ['While drawing or resizing', [
     ['Keep proportions / 45°', 'Shift'], ['From the center', 'Alt'], ['Ignore snapping', 'Mod'], ['Rotate in 15° steps', 'Shift'],
@@ -100,6 +101,7 @@ export function bindShortcuts(editor, { layers, onShortcuts, onAskAI } = {}) {
         })));
       }
       if (code === 'Slash' && e.shiftKey) return run(() => onShortcuts && onShortcuts());
+      if (code === 'Slash') return run(() => showQuickActions(editor, { layers, onShortcuts: onShortcuts || editor.showShortcuts }));
       return;
     }
 

@@ -7,8 +7,12 @@ import * as C from '../core/commands.js';
 import { FRAME_PRESETS, FONTS, WEIGHTS, solid, stroke, shadow, isLine, isFrameLike, TYPE_LABEL } from '../core/model.js';
 import { hasRadius } from '../core/paths.js';
 import { setBox } from '../core/transform.js';
+import { createGradient } from '../core/gradient.js';
 import { defaultLayout } from '../core/layout.js';
-import { exportSVG } from '../render/scene.js';
+import { assetURL, exportSVG } from '../render/scene.js';
+import { exportRaster } from '../render/raster.js';
+import { prototypeFrames } from '../core/prototype.js';
+import { prototypePanel } from './prototype.js';
 import { cssFor } from './inspect.js';
 
 const fmt = (v, p = 2) => {
@@ -55,20 +59,25 @@ export class PropertiesPanel {
 
   renderTabs() {
     this.head.replaceChildren(
-      ...['design', 'inspect'].map((t) => h('button', {
-        class: 'dz-tab' + (this.tab === t ? ' on' : ''),
+      ...['design', 'prototype', 'inspect'].map((t) => h('button', {
+        class: 'dz-tab' + (this.tab === t ? ' on' : ''), 'aria-pressed': String(this.tab === t),
         onclick: () => { this.tab = t; this.renderTabs(); this._sig = null; this.refresh(new Set(['doc'])); },
-      }, t === 'design' ? 'Design' : 'Inspect')),
+      }, ({ design: 'Design', prototype: 'Prototype', inspect: 'Inspect' })[t])),
     );
   }
 
   signature() {
     const s = this.store;
+    if (this.tab === 'prototype') {
+      return JSON.stringify([this.tab, s.selection, s.doc.prototypeStart,
+        prototypeFrames(s).map((n) => [n.id, n.name]),
+        this.nodes().map((n) => [n.id, n.parent, this.store.ancestors(n.id).map((a) => a.id), n.prototypeAction])]);
+    }
     return JSON.stringify([
       this.tab, s.tool === 'frame' ? 'frame' : '', s.selection, this.ui,
       this.nodes().map((n) => [
-        n.type, (n.fills || []).map((f) => f.type), (n.strokes || []).length, (n.effects || []).map((e) => e.type),
-        n.layout ? [n.layout.mode, n.layout.primary === 'space-between'] : null, !!n.radii, n.parent && s.get(n.parent)?.layout ? 1 : 0,
+        n.type, (n.fills || []).map((f) => [f.type, f.stops?.length]), (n.strokes || []).length, (n.effects || []).map((e) => e.type),
+        n.layout ? [n.layout.mode, n.layout.primary === 'space-between', !!n.layout.wrap] : null, !!n.radii, n.parent && s.get(n.parent)?.layout ? 1 : 0,
         n.parent ? s.get(n.parent)?.type : null, n.absolute, n.sizing, n.text && n.text.autoResize,
       ]),
       same(this.nodes().map((n) => n.fills)), same(this.nodes().map((n) => n.strokes)), same(this.nodes().map((n) => n.effects)),
@@ -89,7 +98,9 @@ export class PropertiesPanel {
   build() {
     const scroll = this.body.scrollTop;
     this.binders = [];
-    const content = this.tab === 'inspect' ? this.inspect() : this.design();
+    const content = this.tab === 'prototype'
+      ? [this.section('Prototype', null, ...prototypePanel(this.editor))]
+      : this.tab === 'inspect' ? this.inspect() : this.design();
     this.body.replaceChildren(...content);
     this.body.scrollTop = scroll;
   }
@@ -445,7 +456,7 @@ export class PropertiesPanel {
           }
         };
         rows.push(h('div', { class: 'dz-grid2' },
-          this.select(opts('h'), { title: 'Horizontal resizing', get: () => getS('h'), set: (v) => setS('h', v) }),
+          this.select(opts('h'), { title: 'Horizontal resizing', get: () => getS('h'), set: (v) => { setS('h', v); if (v === 'hug' && n.layout) n.layout.wrap = false; } }),
           this.select(opts('v'), { title: 'Vertical resizing', get: () => getS('v'), set: (v) => setS('v', v) }),
         ));
       }
@@ -468,6 +479,17 @@ export class PropertiesPanel {
       this.iconToggle(ICONS.layoutV, 'Vertical layout', () => L().mode === 'vertical', () => store.transact(() => { L().mode = 'vertical'; })),
       this.iconToggle(ICONS.layoutH, 'Horizontal layout', () => L().mode === 'horizontal', () => store.transact(() => { L().mode = 'horizontal'; })),
     );
+    const wrap = L().mode === 'horizontal' && h('label', { class: 'dz-check' }, h('input', {
+      type: 'checkbox', checked: !!L().wrap, onchange: (e) => store.transact(() => {
+        L().wrap = e.target.checked;
+        const frame = store.get(f.id);
+        if (L().wrap && frame.sizing.h === 'hug') frame.sizing.h = 'fixed';
+      }),
+    }), 'Wrap rows');
+    const rowGap = L().mode === 'horizontal' && L().wrap && this.num({
+      label: 'Rows', title: 'Row gap', min: 0, targets: () => [L()],
+      getOne: (l) => l.rowGap ?? l.gap, setOne: (l, v) => { l.rowGap = v; },
+    });
     const grid = h('div', { class: 'dz-align-grid', role: 'group', 'aria-label': 'Alignment' });
     const pos = ['start', 'center', 'end'];
     for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) {
@@ -512,7 +534,7 @@ export class PropertiesPanel {
     return this.section('Auto layout',
       [h('button', { class: 'dz-icon-btn', title: 'Remove auto layout (Alt+Shift+A)', 'aria-label': 'Remove auto layout', html: ICONS.minus, onclick: () => C.removeAutoLayout(store) })],
       h('div', { class: 'dz-al' }, h('div', { class: 'dz-al-left' }, dir, h('div', { class: 'dz-gap-row' }, gap, autoGap)), grid),
-      h('div', { class: 'dz-pad-row' }, pad, padToggle),
+      h('div', { class: 'dz-pad-row' }, pad, padToggle), wrap, rowGap,
     );
   }
 
@@ -629,27 +651,76 @@ export class PropertiesPanel {
       onclick: () => store.transact(() => set('visible', get('visible') === false)) });
     const del = h('button', { class: 'dz-icon-btn', title: 'Remove', html: ICONS.minus,
       onclick: () => store.transact(() => all().forEach((n) => n[key].splice(i, 1))) });
+    const isGradient = p.type === 'linear' || p.type === 'radial';
+    const imageAllowed = key === 'fills' && all().every((n) => n.type !== 'text');
+    const fillType = imageAllowed ? this.select([
+      { value: 'solid', label: 'Solid' }, { value: 'linear', label: 'Linear gradient' },
+      { value: 'radial', label: 'Radial gradient' }, { value: 'image', label: 'Image' },
+    ], { title: 'Fill type', get: () => get('type'), set: (type) => {
+      for (const n of all()) {
+        const previous = paint(n);
+        if (type === 'image') {
+          n.fills[i] = { type, asset: null, fit: 'fill', opacity: previous.opacity, visible: previous.visible };
+        } else if (type === 'solid') {
+          n.fills[i] = { ...solid(previous.stops?.[0]?.color ?? previous.color ?? '#D9D9D9', previous.opacity), visible: previous.visible };
+        } else n.fills[i] = createGradient(type, previous);
+      }
+    } }) : null;
     let main;
     if (p.type === 'image') {
-      const url = p.asset && store.assets[p.asset];
+      const ids = all().map((n) => n.id);
+      const url = assetURL(store, p.asset);
       main = h('div', { class: 'dz-color' },
-        h('span', { class: 'dz-thumb', style: { backgroundImage: url ? `url(${url})` : 'none' } }),
+        url && h('img', { class: 'dz-thumb', src: url, alt: '' }),
         this.select([{ value: 'fill', label: 'Fill' }, { value: 'fit', label: 'Fit' }, { value: 'stretch', label: 'Stretch' }], { title: 'Image fit', get: () => get('fit'), set: (v) => set('fit', v) }),
-        h('button', { class: 'dz-btn small', onclick: () => this.chooseImage((id) => store.transact(() => set('asset', id))) }, 'Replace'));
+        h('button', { class: 'dz-btn small', onclick: () => this.chooseImage((id) => store.transact(() => {
+          for (const nodeId of ids) {
+            const fill = store.get(nodeId)?.fills[i];
+            if (fill?.type === 'image') fill.asset = id;
+          }
+        })) }, 'Choose image'));
+    } else if (isGradient) {
+      main = this.gradientFields(p, () => all().map(paint).filter(Boolean));
     } else {
       main = this.colorRow({
         get: () => get('color'), set: (c) => set('color', c),
         opacity: () => get('opacity'), setOpacity: (o) => set('opacity', o),
       });
     }
-    const typeSel = key === 'fills' ? h('button', {
-      class: 'dz-icon-btn' + (p.type === 'image' ? ' on' : ''), title: p.type === 'image' ? 'Use a solid colour' : 'Use an image', 'aria-label': 'Toggle image fill', html: ICONS.image,
-      onclick: () => {
-        if (p.type === 'image') { store.transact(() => all().forEach((n) => { n.fills[i] = solid('#D9D9D9'); })); return; }
-        this.chooseImage((id) => store.transact(() => all().forEach((n) => { n.fills[i] = { type: 'image', asset: id, fit: 'fill', opacity: 1, visible: true }; })));
-      },
-    }) : null;
-    return h('div', { class: 'dz-paint' + (p.visible === false ? ' off' : '') }, h('div', { class: 'dz-paint-main' }, main), typeSel, eye, del);
+    return h('div', { class: 'dz-paint-editor' },
+      fillType && h('div', { class: 'dz-paint' }, fillType, eye, del),
+      h('div', { class: 'dz-paint' + (p.visible === false ? ' off' : '') },
+        h('div', { class: 'dz-paint-main' }, main), !fillType && eye, !fillType && del));
+  }
+
+  gradientFields(paint, targets) {
+    const store = this.store;
+    const stops = paint.stops ?? [];
+    const angle = paint.type === 'linear' && this.num({
+      label: 'Angle', title: 'Gradient angle', suffix: '°', targets,
+      getOne: (p) => p.angle, setOne: (p, v) => { p.angle = ((v % 360) + 360) % 360; },
+    });
+    const opacity = this.num({
+      label: 'Opacity', title: 'Gradient opacity', suffix: '%', min: 0, max: 100, targets,
+      getOne: (p) => (p.opacity ?? 1) * 100, setOne: (p, v) => { p.opacity = v / 100; },
+    });
+    const rows = stops.map((_stop, i) => {
+      const entries = () => targets().map((p) => p.stops[i]).filter(Boolean);
+      return h('div', { class: 'dz-gradient-stop' },
+        this.num({
+          label: 'At', title: `Stop ${i + 1} position`, suffix: '%', min: 0, max: 100, targets: entries,
+          getOne: (s) => s.position * 100, setOne: (s, v) => { s.position = v / 100; },
+        }),
+        this.colorRow({
+          title: `Stop ${i + 1} color`, get: () => entries()[0]?.color ?? '#000000', set: (color) => entries().forEach((s) => { s.color = color; }),
+          opacity: () => entries()[0]?.opacity ?? 1, setOpacity: (v) => entries().forEach((s) => { s.opacity = v; }),
+        }),
+        h('button', { class: 'dz-icon-btn', 'aria-label': `Remove gradient stop ${i + 1}`, disabled: stops.length <= 2,
+          html: ICONS.minus, onclick: () => store.transact(() => targets().forEach((p) => p.stops.splice(i, 1))) }));
+    });
+    const add = h('button', { class: 'dz-btn', disabled: stops.length >= 16, onclick: () =>
+      store.transact(() => targets().forEach((p) => p.stops.push({ color: '#808080', position: 0.5, opacity: 1 }))) }, 'Add stop');
+    return h('div', { class: 'dz-gradient' }, h('div', { class: 'dz-grid2' }, angle, opacity), ...rows, add);
   }
 
   chooseImage(cb) {
@@ -699,9 +770,33 @@ export class PropertiesPanel {
     const store = this.store;
     const ids = nodes.map((n) => n.id);
     const name = nodes.length === 1 ? nodes[0].name : 'Selection';
-    return this.section('Export', null, h('div', { class: 'dz-row-btns' },
-      h('button', { class: 'dz-btn', onclick: () => download(`${name}.svg`, exportSVG(store, ids)) }, 'Export SVG'),
-      h('button', { class: 'dz-btn', onclick: async () => {
+    const format = h('select', { class: 'dz-select', 'aria-label': 'Export format' },
+      ...['svg', 'png', 'jpg'].map((value) => h('option', { value }, value.toUpperCase())));
+    const scale = h('select', { class: 'dz-select', 'aria-label': 'Export scale', disabled: true },
+      ...[1, 2, 3].map((value) => h('option', { value }, `${value}×`)));
+    const button = h('button', { class: 'dz-btn', onclick: async () => {
+      const ext = format.value;
+      if (ext === 'svg') {
+        download(`${name}.svg`, exportSVG(store, ids));
+        return;
+      }
+      button.disabled = true;
+      try {
+        const raster = await exportRaster(store, ids, { format: ext, scale: Number(scale.value) });
+        download(`${name}.${ext}`, raster, raster.type);
+      } catch (error) {
+        toast(error.message);
+      } finally {
+        button.disabled = false;
+      }
+    } }, 'Export SVG');
+    format.addEventListener('change', () => {
+      button.textContent = `Export ${format.value.toUpperCase()}`;
+      scale.disabled = format.value === 'svg';
+    });
+    return this.section('Export', null,
+      h('div', { class: 'dz-grid2' }, format, scale),
+      h('div', { class: 'dz-row-btns' }, button, h('button', { class: 'dz-btn', onclick: async () => {
         try { await navigator.clipboard.writeText(exportSVG(store, ids)); toast('Copied as SVG'); } catch { toast('Copy is blocked here. Use Export SVG.'); }
       } }, 'Copy as SVG')));
   }
