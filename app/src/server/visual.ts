@@ -418,6 +418,7 @@ export class ReviewManager {
     const project = this.deps.project();
     if (!project) throw new Error('Open a project first.');
     const review = await this.get(id);
+    if (review.proposal) throw new Error('Run preview and checks on the proposal to capture it again.');
     const dir = join(reviewsDir(project), id);
     const urls = await this.deps.urls();
     const shots: VisualShot[] = [];

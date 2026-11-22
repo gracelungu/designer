@@ -76,3 +76,11 @@ Automatic sync checks for changes about every 30 seconds while the Designer wind
 ## Opting into a tracked workspace
 
 Open **Versions → Shared workspace → Set up shared workspace** to choose a shared name and create `.designer/workspace.json`. This small manifest starts with a schema version and a stable workspace ID. Designer stages only this manifest. Collaborators receive it as part of the branch once committed and synced. Renaming preserves its ID, and imported workspaces can be tracked explicitly. The setup respects repository ignore rules and leaves credentials and the automatic sync preference in the local environment. The document and library manifests in the proposed schema can build on this workspace ID as those features land.
+
+## Reviewing a design change before applying it
+
+In the design and code review panel, choose whether an edit belongs to one example, the production component default, or a named shared token. Review the intended values, the proposed file diff, and possible source references. Reference results are text matches and may miss indirect consumers.
+
+The agent reads the project and suggests its own preparation commands, tests, and preview routes. **Run preview and checks** runs those commands locally in temporary copies. Browser previews use an allocated `$PORT`. Projects that only have verification commands can use the same flow without a browser preview. A missing runtime, project dependency or suitable verification command appears as failed or skipped evidence.
+
+After applying a proposal, you can include its intent, check results, and available comparisons in **Share for review**. Designer only attaches that evidence when the proposal’s changed files match the PR commit. The validation itself ran against the temporary workspace snapshots, so it does not replace the repository’s CI.

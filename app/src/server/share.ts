@@ -9,6 +9,7 @@ import { promisify } from 'node:util';
 import type { ShareStep, VisualReview } from '../shared/protocol.js';
 import { gitStatus } from './project.js';
 import { excludeReviews, summarize } from './visual.js';
+import { contentHash } from './proposalReview.js';
 import { previewLink } from './preview.js';
 
 const run = promisify(execFile);
@@ -105,11 +106,33 @@ export interface PrBodyInput {
   /** review id + file name -> image URL. */
   image: (reviewId: string, file: string) => string | undefined;
   files: string[];
+  commit?: string;
 }
 
-export function prBody({ description, reviews, image, files }: PrBodyInput) {
+const inline = (value: unknown) => String(value ?? 'none').replace(/[\r\n]+/g, ' ')
+  .replace(/[&<>`*_[\]|]/g, (char) => `&#${char.charCodeAt(0)};`).slice(0, 400);
+
+export function prBody({ description, reviews, image, files, commit }: PrBodyInput) {
   const parts: string[] = [];
   if (description?.trim()) parts.push(description.trim());
+  const proposals = reviews.filter((r) => r.proposal);
+  if (proposals.length) {
+    parts.push('## Design intent and verification');
+    if (commit) parts.push(`Proposal file contents match commit \`${commit}\`. Previews and checks ran on separate workspace copies where available.`);
+    const labels = { example: 'This example', component: 'Component default', token: 'Shared token' };
+    for (const review of proposals) {
+      const proposal = review.proposal!;
+      const lines = proposal.intent.flatMap((layer) => [
+        `- **${inline(layer.name)}** · ${labels[layer.scope]}${layer.token ? ` · ${inline(layer.token)}` : ''}`,
+        ...layer.changes.map((change) => `  - ${inline(change.label)}: ${inline(change.from)} → ${inline(change.to)}`),
+      ]);
+      if (proposal.base) lines.push(`- Workspace base: \`${inline(proposal.base)}\``);
+      for (const check of proposal.checks) lines.push(`- ${inline(check.status)} · <code>${inline(check.command)}</code>`);
+      for (const shot of review.shots) if (shot.error) lines.push(`- Preview unavailable · ${inline(shot.label)}`);
+      if (review.note) lines.push(`- ${inline(review.note)}`);
+      parts.push(lines.join('\n'));
+    }
+  }
   const visual = reviews.filter((r) => r.shots.length);
   if (visual.length) {
     parts.push('## What changed visually');
@@ -176,6 +199,23 @@ export interface SendResult {
   branch?: string;
   /** True when the link opens a prefilled page and the designer clicks Create there. */
   needsConfirm?: boolean;
+  reviewIds?: string[];
+}
+
+export async function matchingReviews(cwd: string, commit: string, reviews: VisualReview[]) {
+  const prefix = (await git(cwd, ['rev-parse', '--show-prefix']).catch(() => '')).trimEnd();
+  const out: VisualReview[] = [];
+  for (const review of reviews) {
+    if (!review.proposal) { out.push(review); continue; }
+    const hashes = Object.entries(review.proposal.hashes);
+    if (!hashes.length) continue;
+    const matches = await Promise.all(hashes.map(async ([path, hash]) => {
+      const value = await git(cwd, ['show', `${commit}:${prefix}${path}`]).catch(() => null);
+      return value !== null && contentHash(value) === hash;
+    }));
+    if (matches.every(Boolean)) out.push(review);
+  }
+  return out;
 }
 
 export async function sendForReview(cwd: string, opts: SendOptions): Promise<SendResult> {
@@ -226,7 +266,9 @@ export async function sendForReview(cwd: string, opts: SendOptions): Promise<Sen
   const gh = parseGitHubRemote(remote);
   const images = new Map<string, string>();
   const shotFiles: ShotFile[] = [];
-  for (const r of opts.reviews)
+  const savedCommit = (await git(cwd, ['rev-parse', 'HEAD'])).trim();
+  const eligible = await matchingReviews(cwd, savedCommit, opts.reviews);
+  for (const r of eligible)
     for (const s of r.shots)
       for (const f of [s.before, s.after, s.diff]) if (f) shotFiles.push({ path: `reviews/${branch}/${r.id}/${f}`, abs: join(opts.reviewDir(r.id), f) });
   let screenshotsNote = '';
@@ -266,7 +308,11 @@ export async function sendForReview(cwd: string, opts: SendOptions): Promise<Sen
   step('pr', 'running');
   const link = opts.preview ? previewLink(remote, branch) : undefined;
   const description = link ? `**Design preview:** ${link}\n\nFrames, comments and specs from Designer. Open \`.designer/preview/index.html\` for the interactive version.${opts.description?.trim() ? `\n\n${opts.description.trim()}` : ''}` : opts.description;
-  const body = prBody({ description, reviews: opts.reviews, image: (id, f) => images.get(`reviews/${branch}/${id}/${f}`), files });
+  const commit = (await git(cwd, ['rev-parse', 'HEAD'])).trim();
+  const reviews = commit === savedCommit ? eligible : await matchingReviews(cwd, commit, eligible);
+  const reviewIds = reviews.map((review) => review.id);
+  if (reviews.length < opts.reviews.length) screenshotsNote += ' Outdated proposal evidence was omitted because its files changed.';
+  const body = prBody({ description, reviews, image: (id, f) => images.get(`reviews/${branch}/${id}/${f}`), files, commit });
   const bodyFile = join(tmpdir(), `designer-pr-${process.pid}-${Date.now()}.md`);
   await writeFile(bodyFile, body);
   try {
@@ -275,7 +321,7 @@ export async function sendForReview(cwd: string, opts: SendOptions): Promise<Sen
       const { stdout } = await run(ghBin, ['pr', 'create', '--base', base, '--head', branch, '--title', title, '--body-file', bodyFile], { cwd, timeout: 60000 });
       const url = stdout.trim().split('\n').pop();
       step('pr', 'done', url);
-      return { ok: true, message: `Sent for review.${screenshotsNote}`, url, branch };
+      return { ok: true, message: `Sent for review.${screenshotsNote}`, url, branch, reviewIds };
     } catch (e) {
       const err = e as { stderr?: string; code?: string };
       const existing = /https:\/\/\S+\/pull\/\d+/.exec(err.stderr ?? '');
@@ -283,7 +329,7 @@ export async function sendForReview(cwd: string, opts: SendOptions): Promise<Sen
         // Already open: add the new screenshots to the conversation instead.
         await run(ghBin, ['pr', 'comment', existing[0], '--body-file', bodyFile], { cwd, timeout: 60000 }).catch(() => undefined);
         step('pr', 'done', existing[0]);
-        return { ok: true, message: `Updated the open review with your new changes.${screenshotsNote}`, url: existing[0], branch };
+        return { ok: true, message: `Updated the open review with your new changes.${screenshotsNote}`, url: existing[0], branch, reviewIds };
       }
       const url = compareUrl(remote, base, branch, title, body);
       step('pr', 'done', 'Finish in the browser');

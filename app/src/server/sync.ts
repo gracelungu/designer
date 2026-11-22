@@ -2,12 +2,14 @@
 // held as a reviewable proposal (Keep or Discard). Code -> design: watches the project's HEAD so a pull,
 // a commit or a branch switch tells the canvas which files changed under it.
 import { randomUUID } from 'node:crypto';
-import { cp, link, lstat, mkdir, mkdtemp, readFile, rename, rm, unlink, writeFile } from 'node:fs/promises';
+import { cp, link, lstat, mkdir, mkdtemp, readFile, rename, rm, realpath, unlink, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { tmpdir } from 'node:os';
 import { ClaudeCli, type CliMessage, type CliOptions } from './claudeCli.js';
 import { git } from './project.js';
-import type { CodeChange, LayerSync, SyncFile, SyncJob } from '../shared/protocol.js';
+import { contentHash, planProposal, verifyProposal } from './proposalReview.js';
+import { excludeReviews, reviewsDir, type Shooter } from './visual.js';
+import type { CodeChange, LayerSync, ProposalScope, SyncFile, SyncJob, VisualReview } from '../shared/protocol.js';
 
 const EDIT_TOOLS = ['Edit', 'Write', 'MultiEdit'];
 /** Tools a sync job may use: reading the repo and editing files in it. Commands are refused. */
@@ -15,16 +17,25 @@ const READ_TOOLS = ['Read', 'Glob', 'Grep', 'LS', 'TodoWrite'];
 
 const fmt = (v: unknown) => (v === undefined || v === null || v === '' ? 'none' : typeof v === 'string' ? v : JSON.stringify(v));
 
+export function scopeFor(layer: LayerSync): ProposalScope {
+  return layer.scope ?? (layer.kind === 'component' ? 'example' : 'component');
+}
+
 /** What Claude is asked to do for a set of canvas edits. */
 export function buildSyncPrompt(layers: LayerSync[]): string {
   const parts = layers.map((l, i) => {
     const where = [l.file && `file ${l.file}`, l.exportName && `export ${l.exportName}`, l.storyId && `story ${l.storyId}`].filter(Boolean).join(', ');
     const lines = l.changes.map((c) => `   - ${c.label}: ${fmt(c.from)} -> ${fmt(c.to)}${c.css ? `  (CSS: ${c.css})` : ''}`);
-    const what =
-      l.kind === 'component'
-        ? `The live component "${l.name}" (${where}) had its props changed on the canvas. Make the story render with these props by default (update its args):`
-        : `The design layer "${l.name}" is linked to a coded component (${where}). The designer changed it on the canvas. Change the component's code so it renders the same way:`;
-    return `${i + 1}. ${what}\n${lines.join('\n')}`;
+    const subject = l.kind === 'component' ? `The live component "${l.name}" (${where})`
+      : `The design layer "${l.name}" is linked to a coded component (${where})`;
+    const scope = scopeFor(l);
+    const instruction = scope === 'example'
+      ? 'Update only this example or instance in its existing route, demo, fixture or story. Keep production defaults and shared tokens unchanged.'
+      : scope === 'token'
+        ? `Change only the shared token "${l.token}" at its source, retaining aliases and modes. Preserve unrelated token values and component behavior.`
+        : 'Update the production component default or styling for this edit. Keep existing explicit overrides working. A change to a demo or story alone does not meet the request.';
+    return `${i + 1}. ${subject}. ${instruction}
+${lines.join('\n')}`;
   });
   return [
     'Designer sync: apply these canvas edits to the code.',
@@ -34,9 +45,12 @@ export function buildSyncPrompt(layers: LayerSync[]): string {
     'Rules:',
     '- Change only what is listed. Keep every other style, prop and behaviour as it is.',
     "- Follow this repo's conventions. Where a design token, CSS variable or theme value matches a new value, use it instead of the raw value.",
-    '- Find the component through the story file when the component file is not named.',
+    '- Locate the production source through the repository’s exports, routes, examples or fixture when it is not named. Use the existing stack and conventions.',
     '- Edit files only. Do not run commands, install packages, commit, or touch the Designer canvas.',
-    '- Finish with one short sentence per file you changed, saying what changed.',
+    '- Finish with one short sentence per file, followed by an optional fenced designer-review JSON block with keys prepare, preview, routes and checks.',
+    '- Discover verification from the repository’s documentation, scripts or build configuration. Use the project’s own tools. Any browser preview must listen on $PORT, and routes must be relative to that preview.',
+    '- prepare and checks are arrays of {command,cwd}. preview is one {command,cwd}. routes are strings such as "/settings" for useful states already available locally. cwd is relative to the repository. Omit steps you cannot identify. If the project has no browser UI, propose its own relevant verification commands instead.',
+    '- Verification commands are suggestions for the designer to run in a separate checkout after reviewing them. Never invent passing results or add tooling solely for this plan.',
   ].join('\n');
 }
 
@@ -214,6 +228,8 @@ export class CodeSync {
       send: (job: SyncJob) => void;
       model?: () => string | undefined;
       run?: typeof runCodeJob;
+      shooter?: Shooter;
+      review?: (review: VisualReview) => void;
     },
   ) {}
 
@@ -221,14 +237,20 @@ export class CodeSync {
     return [...this.jobs.values()].filter((job) => job.project === project).sort((a, b) => b.createdAt - a.createdAt);
   }
 
-  start(layers: LayerSync[]): SyncJob {
+  start(layers: LayerSync[], targetSvg?: string): SyncJob {
     const claudePath = this.o.claudePath();
     if (!claudePath) throw new Error('Claude Code was not found or is signed out.');
-    const real = layers.filter((l) => l.changes.length);
+    const real = layers.filter((layer) => layer.changes.length).map((layer) => {
+      const scope = scopeFor(layer);
+      if (!['example', 'component', 'token'].includes(scope)) throw new Error('Choose a proposal scope.');
+      const token = scope === 'token' && typeof layer.token === 'string' ? layer.token.trim() : undefined;
+      if (scope === 'token' && (!token || token.length > 120)) throw new Error('Name the token to change.');
+      return { ...layer, scope, token };
+    });
     if (!real.length) throw new Error('There are no canvas changes to send to code.');
     const cwd = this.o.cwd();
     if (this.list(cwd).some((job) => job.status === 'running')) throw new Error('Claude is already preparing a code proposal for this project.');
-    const job: SyncJob = { id: randomUUID(), project: cwd, layers: real, status: 'running', progress: [], files: [], summary: '', createdAt: Date.now() };
+    const job: SyncJob = { id: randomUUID(), project: cwd, layers: real, status: 'running', progress: [], files: [], summary: '', targetSvg: targetSvg?.length && targetSvg.length <= 250_000 ? targetSvg : undefined, createdAt: Date.now() };
     this.jobs.set(job.id, job);
     this.o.send(job);
     void this.prepare(cwd, claudePath, job);
@@ -251,7 +273,12 @@ export class CodeSync {
       });
       if (!result.files.length) throw new Error(result.summary ? `Claude did not change any files: ${result.summary}` : 'Claude did not change any files.');
       job.files = result.files;
-      job.summary = result.summary;
+      const { summary, plan } = await planProposal(cwd, result.summary);
+      job.summary = summary;
+      job.plan = plan;
+      const targets = [...new Set(job.layers.map((l) => l.token || l.exportName || l.name))].slice(0, 5);
+      const references = await git(cwd, ['grep', '-l', '-z', '-F', ...targets.flatMap((name) => ['-e', name]), '--', '.', ':(exclude).designer/**']).catch(() => '');
+      job.references = references.split('\0').filter((path) => path && !result.files.some((f) => f.path === path)).slice(0, 12);
       job.status = 'review';
     } catch (e) {
       job.status = 'failed';
@@ -266,7 +293,69 @@ export class CodeSync {
     const job = this.jobs.get(id);
     if (!job || job.project !== this.o.cwd()) throw new Error('That proposal is not in this project.');
     if (this.applying.has(job.project!)) throw new Error('A code proposal is already being applied.');
+    if (job.verifying) throw new Error('Wait for the proposal checks to finish.');
     if (job.status !== 'review') throw new Error(`That change was already ${job.status === 'kept' ? 'kept' : job.status === 'discarded' ? 'discarded' : 'handled'}.`);
+    return job;
+  }
+
+  private reviewRecord(job: SyncJob, base: string): VisualReview {
+    return {
+      id: job.id, title: `Design proposal: ${job.layers.map((l) => l.name).join(', ')}`, createdAt: Date.now(),
+      files: job.files.map((file) => file.path), shots: [], note: 'Preview and checks have not been run.',
+      proposal: {
+        base,
+        intent: job.layers.map((l) => ({ name: l.name, scope: scopeFor(l), token: l.token, changes: l.changes })),
+        hashes: Object.fromEntries(job.files.map((f) => [f.path, contentHash(f.after)])),
+        checks: [],
+      },
+    };
+  }
+
+  async verify(id: string) {
+    const job = this.get(id);
+    if (!job.plan || !this.o.shooter) throw new Error('Preview and checks are unavailable.');
+    const project = job.project!;
+    job.verifying = true;
+    const review = this.reviewRecord(job, await headOf(project));
+    this.o.send(job);
+    let temp: string | undefined;
+    try {
+      if (await checkoutRef(project) !== this.refs.get(id)) throw new Error('Open the branch where this proposal was created.');
+      temp = await mkdtemp(join(tmpdir(), 'designer-verify-'));
+      const before = join(temp, 'before'), after = join(temp, 'after');
+      await mkdir(before, { recursive: true });
+      await sourceSnapshot(project, before);
+      await cp(before, after, { recursive: true });
+      for (const file of job.files) {
+        const path = await proposalTarget(after, file.path);
+        const value = await readFile(path, 'utf8').catch((e: NodeJS.ErrnoException) => {
+          if (e.code === 'ENOENT') return null;
+          throw e;
+        });
+        if (value !== file.before) throw new Error(`${file.path} changed. Create a fresh proposal before verifying it.`);
+        await mkdir(dirname(path), { recursive: true });
+        await writeProposalFile(path, file.after, value !== null);
+      }
+      await excludeReviews(project);
+      const dir = join(reviewsDir(project), id);
+      const evidence = await verifyProposal(await realpath(before), await realpath(after), job.plan, this.o.shooter, dir);
+      for (const file of job.files) {
+        const path = await proposalTarget(after, file.path);
+        if (await readFile(path, 'utf8') !== file.after) {
+          throw new Error(`The verification commands changed ${file.path}. The captured results do not represent this proposal.`);
+        }
+      }
+      review.shots = evidence.shots;
+      review.note = evidence.note;
+      review.proposal!.checks = evidence.checks;
+    } catch (error) {
+      review.note = (error as Error).message;
+    } finally {
+      if (temp) await rm(temp, { recursive: true, force: true }).catch(() => undefined);
+      job.verifying = false;
+      job.evidence = review;
+      this.o.send(job);
+    }
     return job;
   }
 
@@ -292,7 +381,13 @@ export class CodeSync {
         await writeProposalFile(target, file.after, file.before !== null);
         applied.push(item);
       }
+      const review = job.evidence ?? this.reviewRecord(job, await headOf(cwd));
+      await excludeReviews(cwd);
+      const dir = join(reviewsDir(cwd), id);
+      await mkdir(dir, { recursive: true });
+      await writeProposalFile(join(dir, 'review.json'), JSON.stringify(review, null, 2), false);
       job.status = 'kept';
+      this.o.review?.(review);
       this.o.send(job);
       return job;
     } catch (e) {
@@ -307,9 +402,10 @@ export class CodeSync {
     }
   }
 
-  discard(id: string) {
+  async discard(id: string) {
     const job = this.get(id);
     job.status = 'discarded';
+    await rm(join(reviewsDir(job.project!), id), { recursive: true, force: true }).catch(() => undefined);
     this.o.send(job);
     return job;
   }

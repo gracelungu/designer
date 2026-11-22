@@ -556,3 +556,10 @@ textarea.memory { width: 100%; min-height: 160px; border: 1px solid var(--line-2
 .workspace-tracking p { margin: 0; }
 .workspace-tracking[open] > :not(summary) { margin-top: 8px; }
 .workspace-tracking label { display: grid; gap: 4px; }
+
+.proposal-intent, .proposal-plan { margin: 8px 0; }
+.proposal-comparison { display: grid; grid-template-columns: repeat(auto-fit, minmax(100px, 1fr)); gap: 6px; }
+.proposal-image { margin: 6px 0; min-width: 0; }
+.proposal-image figcaption { margin-bottom: 4px; color: var(--muted); }
+.proposal-image img { width: 100%; max-height: 260px; object-fit: contain; border: 1px solid var(--line); border-radius: 6px; }
+.proposal-plan li, .proposal-output { white-space: pre-wrap; overflow-wrap: anywhere; }

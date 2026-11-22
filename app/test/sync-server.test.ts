@@ -2,10 +2,12 @@
 // the real stream-json protocol, so no Claude credits are needed), Keep/Discard, the HEAD watcher,
 // and the HTTP routes end to end.
 import { execFileSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
+import { PNG } from 'pngjs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { matchingReviews, prBody } from '../src/server/share';
 import type { CodeChange, LayerSync, SyncJob } from '../src/shared/protocol';
 import { buildSyncPrompt, CodeSync, filesBetween, HeadWatcher, runCodeJob } from '../src/server/sync';
 
@@ -125,6 +127,55 @@ describe('CodeSync jobs: review, Keep, Discard', () => {
     expect(sent.at(-1)!.status).toBe('review');
   });
 
+  it('reviews a production edit with ordinary project commands and keeps Git evidence', async () => {
+    const dir = repo();
+    rmSync(join(dir, 'src', 'Button.stories.tsx'));
+    writeFileSync(join(dir, 'server.cjs'), `
+      const { createServer } = require('node:http');
+      const { readFileSync } = require('node:fs');
+      createServer((_req, res) => res.end(readFileSync('src/Button.css'))).listen(Number(process.env.PORT), '127.0.0.1');
+    `);
+    writeFileSync(join(dir, 'verify.cjs'), `
+      if (!require('node:fs').readFileSync('src/Button.css', 'utf8').includes('#2563EB')) process.exit(1);
+    `);
+    sh(dir, 'add', '-A');
+    sh(dir, 'commit', '-qm', 'Project commands');
+    const recipe = { prepare: [], preview: { command: 'node server.cjs', cwd: '.' }, routes: ['/buttons'],
+      checks: [{ command: 'node verify.cjs', cwd: '.' }] };
+    script([{ file: 'src/Button.css', old: '#111111', new: '#2563EB' }],
+      'Updated the production Button.\n```designer-review\n' + JSON.stringify(recipe) + '\n```');
+    const rendered: string[] = [];
+    const shooter = { available: true, close: async () => {}, shoot: async ({ url }: { url?: string }) => {
+      const css = await (await fetch(url!)).text();
+      rendered.push(css);
+      const png = new PNG({ width: 1, height: 1 });
+      png.data.fill(css.includes('#2563EB') ? 255 : 0);
+      return PNG.sync.write(png);
+    } };
+    const sync = new CodeSync({ claudePath: () => fake, cwd: () => dir, send: () => {}, shooter });
+    const job = sync.start([{ ...layer, storyId: undefined, file: 'src/Button.css', scope: 'component' }]);
+    await vi.waitFor(() => expect(job.status).toBe('review'), { timeout: 10000 });
+    expect(job.plan).toEqual(recipe);
+    expect(job.summary).toBe('Updated the production Button.');
+    expect(buildSyncPrompt(job.layers)).toContain('Update the production component default');
+    expect(rendered).toEqual([]);
+    await sync.verify(job.id);
+    expect(rendered[0]).toContain('#111111');
+    expect(rendered[1]).toContain('#2563EB');
+    expect(readFileSync(join(dir, 'src/Button.css'), 'utf8')).toContain('#111111');
+    expect(job.evidence?.proposal?.checks).toEqual([{ command: 'node verify.cjs', status: 'passed' }]);
+    expect(job.evidence?.shots[0]).toMatchObject({ label: '/buttons', before: 'route-0-before.png', after: 'route-0-after.png' });
+    await sync.keep(job.id);
+    expect(sh(dir, 'status', '--porcelain')).toBe('M src/Button.css');
+    sh(dir, 'add', '-A');
+    sh(dir, 'commit', '-qm', 'Reviewed Button');
+    const commit = sh(dir, 'rev-parse', 'HEAD');
+    const reviews = await matchingReviews(dir, commit, [job.evidence!]);
+    expect(reviews).toHaveLength(1);
+    expect(prBody({ commit, reviews, image: () => undefined, files: ['src/Button.css'] })).toContain('passed · <code>node verify.cjs</code>');
+    expect(await matchingReviews(dir, 'HEAD^', reviews)).toEqual([]);
+  });
+
   it('Keep applies the proposal', async () => {
     const { dir, sync, job } = await started([{ file: 'src/Button.css', old: '#111111', new: '#2563EB' }]);
     expect((await sync.keep(job.id)).status).toBe('kept');
@@ -147,7 +198,7 @@ describe('CodeSync jobs: review, Keep, Discard', () => {
     const { dir, sync, job } = await started([{ file: 'src/Button.css', old: '#111111', new: '#2563EB' }]);
     writeFileSync(join(dir, 'src/Button.css'), 'hand edited\n');
     await expect(sync.keep(job.id)).rejects.toThrow(/changed after this proposal/);
-    expect(sync.discard(job.id).status).toBe('discarded');
+    expect((await sync.discard(job.id)).status).toBe('discarded');
     expect(readFileSync(join(dir, 'src/Button.css'), 'utf8')).toBe('hand edited\n');
   });
 

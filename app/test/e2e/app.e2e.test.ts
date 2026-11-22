@@ -212,6 +212,74 @@ describe('Mac app updates', () => {
   });
 });
 
+describe('project independent proposal review', () => {
+  it('previews and verifies a plain HTTP project before applying a component change', async () => {
+    const { Camera } = await import('../../src/server/visual');
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), 'designer-plain-preview-')));
+    const source = join(dir, 'badge.html');
+    writeFileSync(source, '<span style="background:red">Badge</span>');
+    writeFileSync(join(dir, 'serve.cjs'), `
+      const { createServer } = require('node:http');
+      const { readFileSync } = require('node:fs');
+      createServer((_req, res) => {
+        res.setHeader('content-type', 'text/html');
+        res.end(readFileSync('badge.html'));
+      }).listen(Number(process.env.PORT), '127.0.0.1');
+    `);
+    writeFileSync(join(dir, 'check.cjs'), `if (!require('node:fs').readFileSync('badge.html', 'utf8').includes('background:blue')) process.exit(1)`);
+    const oldEdits = process.env.FAKE_CLAUDE_EDITS;
+    const oldSummary = process.env.FAKE_CLAUDE_SUMMARY;
+    process.env.FAKE_CLAUDE_EDITS = JSON.stringify([{ file: 'badge.html', old: 'background:red', new: 'background:blue' }]);
+    process.env.FAKE_CLAUDE_SUMMARY = 'Badge background updated.\n```designer-review\n' + JSON.stringify({
+      preview: { command: 'node serve.cjs' }, routes: ['/badge'], checks: [{ command: 'node check.cjs' }],
+    }) + '\n```';
+    const bare = await startServer({
+      workspace: join(dir, 'Designer'), initialProject: dir, staticDir: STATIC,
+      shooter: new Camera(process.env.PW_CHROMIUM ?? chromium.executablePath()),
+    });
+    let p: Page | undefined;
+    try {
+      await fetch(`${bare.url}/api/onboarding`, {
+        method: 'POST', headers: { 'x-designer-token': bare.token, 'content-type': 'application/json' },
+        body: JSON.stringify({ startedWith: 'project' }),
+      });
+      p = await openPage(bare.url);
+      p.setDefaultTimeout(15_000);
+      await p.locator('.chip-text b', { hasText: /designer-plain-preview/ }).waitFor();
+      await p.evaluate(async () => {
+        const { host } = (window as unknown as { __designer: { host: import('../../src/web/canvas/host').CanvasHost } }).__designer;
+        await host.apply({ kind: 'add-nodes', nodes: [{ type: 'frame', name: 'Badge', fill: '#FF0000', codeLink: { file: 'badge.html' } }] });
+        host.editor.store.flush();
+        host.editor.store.transact(() => { host.editor.store.selected()[0].radius = 10; });
+      });
+      await p.getByTestId('sync-bar').click();
+      await p.getByLabel('Change scope').selectOption('component');
+      await p.getByRole('button', { name: 'Propose code change' }).click();
+      await p.getByText('Badge · Component default').waitFor();
+      await p.getByRole('button', { name: 'Run preview and checks' }).click();
+      await p.getByText('Passed ·', { exact: false }).waitFor();
+      await p.getByRole('img', { name: '/badge before' }).waitFor();
+      await p.getByRole('img', { name: '/badge after' }).waitFor();
+      expect(await p.getByRole('img', { name: '/badge after' }).evaluate((img: HTMLImageElement) => img.decode().then(() => img.naturalWidth))).toBeGreaterThan(0);
+      await p.getByRole('button', { name: 'Open visual comparison' }).click();
+      const visual = p.getByRole('dialog', { name: 'Visual review' });
+      await visual.getByRole('button', { name: 'Highlight' }).click();
+      await visual.getByRole('img', { name: '/badge changes highlighted' }).waitFor();
+      await visual.getByRole('button', { name: 'Close', exact: true }).click();
+      expect(readFileSync(source, 'utf8')).toContain('background:red');
+      await p.getByRole('button', { name: 'Apply to checkout' }).click();
+      await expect.poll(() => readFileSync(source, 'utf8')).toContain('background:blue');
+    } finally {
+      if (oldEdits === undefined) delete process.env.FAKE_CLAUDE_EDITS;
+      else process.env.FAKE_CLAUDE_EDITS = oldEdits;
+      if (oldSummary === undefined) delete process.env.FAKE_CLAUDE_SUMMARY;
+      else process.env.FAKE_CLAUDE_SUMMARY = oldSummary;
+      await p?.context().close();
+      bare.close();
+    }
+  });
+});
+
 describe('without Claude Code', () => {
   it('opens a custom component project and prepares a manual handoff without Claude or Storybook', async () => {
     const saved = process.env.DESIGNER_CLAUDE_PATH;

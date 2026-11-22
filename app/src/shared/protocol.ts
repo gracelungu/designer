@@ -313,6 +313,8 @@ export interface VisualReview {
   capturing?: boolean;
   /** The pull request it was sent in. */
   sentIn?: string;
+  proposal?: { base: string; intent: { name: string; scope: ProposalScope; token?: string; changes: DesignChange[] }[];
+    hashes: Record<string, string>; checks: ProposalCheck[] };
 }
 
 export type ShareStep = 'branch' | 'save' | 'screenshots' | 'push' | 'pr';
@@ -445,6 +447,21 @@ export interface DesignChange {
 }
 
 /** A canvas layer linked to code, with what changed on the canvas since design and code last matched. */
+export type ProposalScope = 'example' | 'component' | 'token';
+
+export interface ProposalPlan {
+  prepare: RecipeCommand[];
+  preview?: RecipeCommand;
+  routes: string[];
+  checks: RecipeCommand[];
+}
+
+export interface ProposalCheck {
+  command: string;
+  status: 'passed' | 'failed' | 'skipped';
+  detail?: string;
+}
+
 export interface LayerSync {
   layerId: string;
   name: string;
@@ -454,6 +471,8 @@ export interface LayerSync {
   file?: string;
   exportName?: string;
   changes: DesignChange[];
+  scope?: ProposalScope;
+  token?: string;
 }
 
 export interface SyncFile {
@@ -472,6 +491,11 @@ export interface SyncJob {
   progress: string[];
   files: SyncFile[];
   summary: string;
+  plan?: ProposalPlan;
+  targetSvg?: string;
+  references?: string[];
+  verifying?: boolean;
+  evidence?: VisualReview;
   error?: string;
   createdAt: number;
 }
