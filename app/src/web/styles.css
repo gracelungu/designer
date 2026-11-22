@@ -536,3 +536,15 @@ textarea.memory { width: 100%; min-height: 160px; border: 1px solid var(--line-2
 .name-form { display: flex; flex-direction: column; gap: 6px; }
 .name-form .input { width: 100%; }
 .row-actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+
+.component-controls { display: flex; gap: 6px; padding: 8px 12px 0; }
+.component-controls:last-of-type { margin-bottom: 8px; }
+.component-controls .input { min-width: 0; flex: 1; }
+.components-panel .error-box { margin: 8px 12px; }
+
+.component-source-form { display: grid; gap: 8px; margin: 8px 12px; }
+.component-source-form label { display: grid; gap: 4px; }
+.component-source-form button { justify-self: start; }
+
+.chat-setup { padding: 12px; overflow: auto; }
+.chat-setup .card { width: auto; padding: 12px; overflow-wrap: anywhere; }

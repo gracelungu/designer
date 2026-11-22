@@ -18,7 +18,7 @@ const copy = (name: string) => {
 };
 
 async function boot() {
-  const srv = await startServer({ port: 0, token: 'smoke', workspace: mkdtempSync(join(tmpdir(), 'designer-ws-')) });
+  const srv = await startServer({ port: 0, token: 'smoke', autoSetup: true, workspace: mkdtempSync(join(tmpdir(), 'designer-ws-')) });
   const call = async <T,>(path: string, body?: unknown): Promise<T> => {
     const r = await fetch(`${srv.url}${path}`, {
       method: body === undefined ? 'GET' : 'POST',
@@ -213,6 +213,21 @@ describe('setup by Claude', () => {
     });
     expect(((await r.json()) as { result: { isError: boolean } }).result.isError).toBe(true);
   }, 60000);
+
+  it('opens a custom source catalog without starting a preview and runs static HTML on demand', async () => {
+    const { call, settled } = await boot();
+    const dir = copy('static-html');
+    await call('/api/project', { path: dir, setup: false });
+    expect(await call('/api/project/setup')).toBeNull();
+    await expect(call('/api/components', { project: dir, name: 'Outside', file: '../outside.html' })).rejects.toThrow(/inside this project/);
+    const info = await call<{ components: { name: string; file: string; framework: string }[] }>('/api/components', { project: dir, name: 'Page template', file: 'index.html' });
+    expect(info.components).toContainEqual(expect.objectContaining({ name: 'Page template', file: 'index.html', framework: 'custom' }));
+    expect(await call('/api/project/setup')).toBeNull();
+    await call('/api/project/setup', { localFirst: true });
+    const preview = await settled();
+    expect(preview).toMatchObject({ status: 'done', by: 'local' });
+    expect((await fetch(preview.appUrl!)).ok).toBe(true);
+  });
 
   it('can be turned off per request', async () => {
     const { call } = await boot();

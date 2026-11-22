@@ -112,7 +112,7 @@ describe.skipIf(!enabled)('real frameworks, installed from the registry', () => 
     const call = async <T,>(path: string, body?: unknown) =>
       (await (await fetch(`${srv.url}${path}`, { method: body ? 'POST' : 'GET', headers: { 'x-designer-token': 'real', 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined })).json()) as T;
     try {
-      const info = await call<{ components: ComponentEntry[] }>('/api/project', { path: dir });
+      const info = await call<{ components: ComponentEntry[] }>('/api/project', { path: dir, setup: true });
       expect(info.components.map((c) => c.name)).toEqual(components);
       let s: SetupState | null = null;
       for (let i = 0; i < 4500 && (!s || s.status === 'running'); i++) {

@@ -9,43 +9,62 @@ interface Listing {
   sep: string;
 }
 
-/** Choose the repository folder Claude Code will work in. */
+/** Choose a folder to open in Designer. */
 export function ProjectPicker({ home, current, onOpen, onCancel, onDemo }: { home: string; current?: string; onOpen: (path: string) => Promise<void>; onCancel?: () => void; onDemo?: () => Promise<void> }) {
   const [dir, setDir] = useState<Listing>();
   const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [path, setPath] = useState('');
   const go = (path: string) => api<Listing>(`/api/fs?path=${encodeURIComponent(path)}`).then(setDir, (e: Error) => setError(e.message));
   useEffect(() => {
     void go(current ?? home);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  const open = (p: string) => onOpen(p).catch((e: Error) => setError(e.message));
+  const open = async (fn: () => Promise<void>) => {
+    setBusy(true);
+    setError('');
+    try {
+      await fn();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
   return (
     <div className="modal picker" data-canvas-keys="off">
       <div>
-        <h3>Add a project</h3>
-        <p>Pick your repository's folder. The canvas, components and Save version work on it, and Claude works in it. You can also just mention a project in the chat.</p>
+        <h3>Open a project</h3>
+        <p>Choose a local folder to browse its components and open its canvas.</p>
         {(window.designerNative || onDemo) && (
           <div className="actions" style={{ marginBottom: 10, justifyContent: 'flex-start' }}>
             {window.designerNative && (
-              <button className="btn primary" onClick={async () => {
+              <button className="btn primary" disabled={busy} onClick={() => void open(async () => {
                 const p = await window.designerNative!.pickFolder();
-                if (p) await open(p);
-              }}>Choose folder…</button>
+                if (p) await onOpen(p);
+              })}>Choose folder…</button>
             )}
-            {onDemo && <button className="btn" onClick={() => onDemo().catch((e: Error) => setError(e.message))}>Open the demo project</button>}
+            {onDemo && <button className="btn" disabled={busy} onClick={() => void open(onDemo)}>Open the demo project</button>}
           </div>
         )}
+        <form className="component-controls" onSubmit={(event) => {
+          event.preventDefault();
+          void open(() => onOpen(path.trim()));
+        }}>
+          <input className="input" placeholder="Paste a folder path" aria-label="Project folder path" value={path} onChange={(event) => setPath(event.target.value)} />
+          <button className="btn" disabled={busy || !path.trim()}>Open path</button>
+        </form>
         {dir && (
           <>
             <div className="mono" style={{ wordBreak: 'break-all' }}>{dir.path}</div>
             <div className="folder-list">
               {dir.parent && <button onClick={() => go(dir.parent!)}>↑ ..</button>}
               {dir.dirs.map((d) => (
-                <button key={d} onClick={() => go(dir.path + dir.sep + d)} onDoubleClick={() => open(dir.path + dir.sep + d)}>📁 {d}</button>
+                <button key={d} onClick={() => go(dir.path + dir.sep + d)}>📁 {d}</button>
               ))}
             </div>
             <div className="actions">
-              <button className="btn primary" onClick={() => open(dir.path)}>Open {dir.isRepo ? 'this repository' : 'this folder'}</button>
+              <button className="btn primary" disabled={busy} onClick={() => void open(() => onOpen(dir.path))}>{busy ? 'Opening…' : dir.isRepo ? 'Open this repository' : 'Open this folder'}</button>
               {onCancel && <button className="btn" onClick={onCancel}>Cancel</button>}
             </div>
           </>

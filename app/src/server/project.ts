@@ -1,11 +1,12 @@
+import { randomUUID } from 'node:crypto';
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
-import { readFile, readdir, stat, writeFile, mkdir } from 'node:fs/promises';
+import { readFile, readdir, realpath, rename, rm, stat, writeFile, mkdir } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { basename, dirname, join, relative, sep } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, sep } from 'node:path';
 import { promisify } from 'node:util';
 import { indexComponents } from './setup.js';
 import { existsSync } from 'node:fs';
-import type { GitStatus, MemoryFile, ProjectInfo, StoryEntry } from '../shared/protocol.js';
+import type { ComponentEntry, GitStatus, MemoryFile, ProjectInfo, StoryEntry } from '../shared/protocol.js';
 import { parseAzureRemote, previewLink } from './preview.js';
 import { hostOf } from './reviews.js';
 
@@ -115,12 +116,89 @@ export async function findStories(cwd: string): Promise<StoryEntry[]> {
   return out.sort((a, b) => a.title.localeCompare(b.title));
 }
 
+const COMPONENTS_FILE = join('.designer', 'components.json');
+
+async function componentPath(root: string, path: string) {
+  const target = path && !isAbsolute(path) ? await realpath(join(root, path)).catch(() => '') : '';
+  const file = target ? relative(root, target) : '';
+  if (!file || file === '..' || file.startsWith('..' + sep) || isAbsolute(file) || file.split(sep).includes('.git')) return '';
+  return await stat(target).then((value) => value.isFile(), () => false) ? file.split(sep).join('/') : '';
+}
+
+let catalogWrites = Promise.resolve();
+export function addSourceComponent(cwd: string, input: { name: string; file: string; exportName: string }) {
+  const write = catalogWrites.then(async () => {
+    const file = await componentPath(await realpath(cwd), input.file);
+    if (!input.name || !file) throw new Error('Enter a component name and an existing source file inside this project.');
+    const path = join(cwd, COMPONENTS_FILE);
+    const entries: unknown = await readFile(path, 'utf8').then(JSON.parse, (e: NodeJS.ErrnoException) => {
+      if (e.code === 'ENOENT') return [];
+      throw e;
+    });
+    if (!Array.isArray(entries)) throw new Error(`${COMPONENTS_FILE} must contain an array of components.`);
+    const match = entries.find((entry) => entry?.file === file && (entry.exportName ?? '') === input.exportName);
+    if (match) match.name = input.name;
+    else entries.push({ name: input.name, file, ...(input.exportName && { exportName: input.exportName }) });
+    await mkdir(dirname(path), { recursive: true });
+    const temp = `${path}.${randomUUID()}.tmp`;
+    try {
+      await writeFile(temp, JSON.stringify(entries, null, 2) + '\n', { flag: 'wx' });
+      await rename(temp, path);
+    } finally {
+      await rm(temp, { force: true });
+    }
+  });
+  catalogWrites = write.catch(() => undefined);
+  return write;
+}
+
+/** Teams can list components whose source conventions Designer cannot infer. */
+async function declaredComponents(cwd: string, stories: StoryEntry[]) {
+  const notes: string[] = [];
+  const components: ComponentEntry[] = [];
+  const manifest = COMPONENTS_FILE;
+  let data: unknown;
+  try {
+    data = JSON.parse(await readFile(join(cwd, manifest), 'utf8'));
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== 'ENOENT') notes.push(`Could not read ${manifest}: ${(e as Error).message}`);
+    return { components, notes };
+  }
+  if (!Array.isArray(data)) return { components, notes: [`${manifest} must contain an array of components.`] };
+  const storyIds = new Set(stories.flatMap((entry) => entry.stories.map((story) => story.id)));
+  const root = await realpath(cwd);
+  for (const [index, raw] of data.entries()) {
+    const name = typeof raw?.name === 'string' ? raw.name.trim() : '';
+    const path = typeof raw?.file === 'string' ? raw.file.trim() : '';
+    const file = await componentPath(root, path);
+    if (!name || !file) {
+      notes.push(`Entry ${index + 1} in ${manifest} needs a name and a source file inside this project.`);
+      continue;
+    }
+    const ids = Array.isArray(raw.storyIds) ? [...new Set<string>(raw.storyIds.filter((id: unknown) => typeof id === 'string' && storyIds.has(id)))] : [];
+    const exportName = typeof raw.exportName === 'string' ? raw.exportName.trim() : '';
+    components.push({ name, file, exportName, framework: 'custom', props: [], storyIds: ids });
+  }
+  return { components, notes };
+}
+
 export async function projectInfo(cwd: string): Promise<ProjectInfo> {
   const pkg = await readFile(join(cwd, 'package.json'), 'utf8')
     .then((t) => JSON.parse(t) as { name?: string; scripts?: Record<string, string> })
     .catch(() => ({}) as { name?: string; scripts?: Record<string, string> });
   const stories = await findStories(cwd);
-  return { path: cwd, name: basename(cwd), git: await gitStatus(cwd), scripts: pkg.scripts ?? {}, stories, components: await indexComponents(cwd, stories) };
+  const [git, detected, declared] = await Promise.all([gitStatus(cwd), indexComponents(cwd, stories), declaredComponents(cwd, stories)]);
+  const components = new Map(detected.map((c) => [`${c.file}#${c.exportName}`, c]));
+  for (const c of declared.components) {
+    const key = `${c.file}#${c.exportName}`;
+    const existing = components.get(key);
+    components.set(key, existing ? { ...existing, name: c.name, storyIds: c.storyIds.length ? c.storyIds : existing.storyIds } : c);
+  }
+  return {
+    path: cwd, name: basename(cwd), git, scripts: pkg.scripts ?? {}, stories,
+    components: [...components.values()].sort((a, b) => a.name.localeCompare(b.name) || a.file.localeCompare(b.file)),
+    ...(declared.notes.length && { componentNotes: declared.notes }),
+  };
 }
 
 export function memoryPaths(cwd: string, home = homedir()) {

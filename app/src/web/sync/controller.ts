@@ -37,6 +37,8 @@ export class SyncController {
   private listeners = new Set<() => void>();
   private version = 0;
   private n = 0;
+  private project: string | null = null;
+  private generation = 0;
 
   constructor(private readonly d: SyncDeps) {
     // Every canvas change can make an edit pending (or not), and new links need a baseline.
@@ -79,10 +81,18 @@ export class SyncController {
     const n = this.store.get(layerId);
     if (!n || n.type === 'code' || !n.codeLink?.storyId) return;
     try {
-      const code = stylesToSnap(await this.d.measure(n.codeLink.storyId));
-      n.sync = { ...syncOf(n), code };
+      const link = n.codeLink;
+      const code = stylesToSnap(await this.d.measure(link.storyId!));
+      if (this.store.get(layerId) !== n || n.codeLink !== link) return;
+      this.store.transact(() => { n.sync = { ...syncOf(n), code }; });
     } catch {
       // Storybook isn't running; the first code change will ask instead of merging.
+    }
+  }
+
+  recordUnmeasured() {
+    for (const n of measurableLayers(this.store)) {
+      if (!syncOf(n).code) void this.recordCode(n.id);
     }
   }
 
@@ -90,15 +100,28 @@ export class SyncController {
     return [...this.jobs.values()].filter((j) => j.status === 'running' || j.status === 'review').sort((a, b) => b.createdAt - a.createdAt);
   }
 
-  async loadJobs() {
+  async openProject(project: string | null) {
+    if (this.project === project) return;
+    this.project = project;
+    const generation = ++this.generation;
+    this.jobs.clear();
+    this.updates = [];
+    this.checking = false;
+    this.changed();
+    if (!project) return;
     const list = await this.d.api<SyncJob[]>('/api/sync').catch(() => []);
-    for (const j of list) this.jobs.set(j.id, j);
+    if (generation !== this.generation) return;
+    for (const job of list) {
+      if (job.project === project && !this.jobs.has(job.id)) this.jobs.set(job.id, job);
+    }
     this.changed();
   }
 
   onJob(job: SyncJob) {
+    if (job.project && job.project !== this.project) return false;
     this.jobs.set(job.id, job);
     this.changed();
+    return true;
   }
 
   /** Sends canvas edits (all pending layers, or the ones given) to Claude Code. */
@@ -113,10 +136,13 @@ export class SyncController {
   /** Keeps Claude's code change: what it was asked to do becomes the new common ground. */
   async keep(id: string) {
     const job = await this.d.api<SyncJob>('/api/sync/keep', { id });
+    if (!this.onJob(job)) return job;
     this.store.transact(() => acceptChanges(this.store, job.layers));
-    this.onJob(job);
     // Once Storybook has rebuilt, remember how the code renders now.
+    const generation = this.generation;
     void wait(this.d.settleMs ?? 1500).then(async () => {
+      if (generation !== this.generation) return;
+      this.d.reloadLive();
       for (const l of job.layers) await this.recordCode(l.layerId);
     });
     return job;
@@ -127,6 +153,11 @@ export class SyncController {
     const job = await this.d.api<SyncJob>('/api/sync/discard', { id });
     this.onJob(job);
     return job;
+  }
+
+  markImplemented(layer: LayerSync) {
+    this.store.transact(() => acceptChanges(this.store, [layer]));
+    void this.recordCode(layer.layerId);
   }
 
   /** Puts a layer back the way it was when it last matched the code. */
@@ -141,6 +172,7 @@ export class SyncController {
   /** Code moved under the canvas (a pull, a commit): reload live renders and update linked design layers. */
   async onCodeChanged(change: CodeChange) {
     this.d.reloadLive();
+    const generation = this.generation;
     const layers = measurableLayers(this.store);
     if (!layers.length) return [];
     this.checking = true;
@@ -149,12 +181,17 @@ export class SyncController {
     try {
       await wait(this.d.settleMs ?? 1500);
       for (const n of layers) {
-        const u = await this.updateFromCode(n, change).catch((e: Error) => this.update(n, [], [], change.files, e.message));
+        if (generation !== this.generation) break;
+        const u = await this.updateFromCode(n, change, generation).catch((e: Error) => {
+          if (generation === this.generation && this.store.get(n.id) === n) return this.update(n, [], [], change.files, e.message);
+        });
         if (u) out.push(u);
       }
     } finally {
-      this.checking = false;
-      this.changed();
+      if (generation === this.generation) {
+        this.checking = false;
+        this.changed();
+      }
     }
     return out;
   }
@@ -165,9 +202,11 @@ export class SyncController {
     return u;
   }
 
-  private async updateFromCode(n: EditorNode, change: CodeChange): Promise<CodeUpdate | null> {
+  private async updateFromCode(n: EditorNode, change: CodeChange, generation: number): Promise<CodeUpdate | null> {
+    const link = n.codeLink;
+    const codeAfter = stylesToSnap(await this.d.measure(link!.storyId!));
+    if (generation !== this.generation || this.store.get(n.id) !== n || n.codeLink !== link) return null;
     const rec = syncOf(n);
-    const codeAfter = stylesToSnap(await this.d.measure(n.codeLink!.storyId!));
     const current = snapshot(this.store, n);
     const { apply, conflicts } = mergeFromCode({ base: rec.base, current, codeBefore: rec.code, codeAfter });
     const applied: DesignChange[] = Object.entries(apply).map(([prop, to]) => ({ prop, label: labelFor(prop), from: current[prop] ?? null, to }));
@@ -183,9 +222,7 @@ export class SyncController {
 
   /** Layers with code changes waiting for a decision. */
   incoming() {
-    return this.store
-      .allIds()
-      .map((id) => this.store.get(id)!)
+    return this.store.allIds().map((id) => this.store.get(id)!)
       .filter((n) => isLinked(n) && syncOf(n).incoming?.changes.length);
   }
 

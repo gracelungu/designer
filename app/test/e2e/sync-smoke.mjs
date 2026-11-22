@@ -170,14 +170,14 @@ try {
   });
 
   await check('Send to code runs Claude Code and shows the diff for review', async () => {
-    await page.locator('[data-testid=sync-pending] button', { hasText: 'Send to code' }).click();
+    await page.locator('[data-testid=sync-pending] button', { hasText: 'Propose code change' }).click();
     await page.locator('[data-testid=sync-job-review]').waitFor({ timeout: 20000 });
     const txt = await page.locator('[data-testid=sync-job-review]').textContent();
     if (!txt.includes('src/Button.css') || !txt.includes('background: #2563eb') || !txt.includes('the button background is now #2563eb')) throw new Error(`review card: ${txt.slice(0, 300)}`);
   });
 
   await check('Keep keeps the code change and clears the pending edit', async () => {
-    await page.locator('[data-testid=sync-job-review] button', { hasText: 'Keep' }).click();
+    await page.locator('[data-testid=sync-job-review] button', { hasText: 'Apply to checkout' }).click();
     await until(() => page.locator('[data-testid=sync-job-kept]').count(), 'kept');
     if (!readFileSync(join(mine, 'src', 'Button.css'), 'utf8').includes('#2563eb')) throw new Error('Button.css was not changed');
     if (await page.locator('[data-testid=sync-pending]').count()) throw new Error('edit still pending');

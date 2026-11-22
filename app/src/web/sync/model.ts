@@ -240,7 +240,9 @@ export function layerSync(n: EditorNode, changes: DesignChange[]): LayerSync {
 export function acceptChanges(store: Store, layers: LayerSync[]) {
   for (const l of layers) {
     const n = store.get(l.layerId);
-    if (!n) continue;
+    if (!isLinked(n)) continue;
+    const target = layerSync(n, []);
+    if (target.file !== l.file || target.storyId !== l.storyId || target.exportName !== l.exportName || target.kind !== l.kind) continue;
     const base = { ...(syncOf(n).base ?? {}) };
     for (const c of l.changes) base[c.prop] = c.to;
     n.sync = { ...syncOf(n), base };
@@ -338,9 +340,7 @@ export function mergeFromCode(o: { base?: Snap; current: Snap; codeBefore?: Snap
 
 /** Linked layers that render a story, so their code can be measured. */
 export function measurableLayers(store: Store): EditorNode[] {
-  return store
-    .allIds()
-    .map((id) => store.get(id)!)
+  return store.allIds().map((id) => store.get(id)!)
     .filter((n) => n.type !== 'code' && isLinked(n) && !!n.codeLink?.storyId);
 }
 

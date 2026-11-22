@@ -116,21 +116,23 @@ describe('CodeSync jobs: review, Keep, Discard', () => {
   }
 
   it('a finished job waits for review with the diff', async () => {
-    const { job, sent } = await started([{ file: 'src/Button.css', old: '#111111', new: '#2563EB' }]);
+    const { dir, job, sent } = await started([{ file: 'src/Button.css', old: '#111111', new: '#2563EB' }]);
     expect(job.status).toBe('review');
+    expect(readFileSync(join(dir, 'src/Button.css'), 'utf8')).toContain('#111111');
+    expect(sh(dir, 'status', '--porcelain')).toBe('');
     expect(job.files[0].path).toBe('src/Button.css');
     expect(sent.map((j) => j.status)).toContain('running');
     expect(sent.at(-1)!.status).toBe('review');
   });
 
-  it('Keep leaves the code changed', async () => {
+  it('Keep applies the proposal', async () => {
     const { dir, sync, job } = await started([{ file: 'src/Button.css', old: '#111111', new: '#2563EB' }]);
-    expect(sync.keep(job.id).status).toBe('kept');
+    expect((await sync.keep(job.id)).status).toBe('kept');
     expect(readFileSync(join(dir, 'src/Button.css'), 'utf8')).toContain('#2563EB');
-    expect(() => sync.keep(job.id)).toThrow(/already kept/);
+    await expect(sync.keep(job.id)).rejects.toThrow(/already kept/);
   });
 
-  it('Discard restores edited files and removes created ones', async () => {
+  it('Discard leaves existing and proposed new files untouched', async () => {
     const { dir, sync, job } = await started([
       { file: 'src/Button.css', old: '#111111', new: '#2563EB' },
       { file: 'src/tokens.css', new: ':root{}\n' },
@@ -141,12 +143,29 @@ describe('CodeSync jobs: review, Keep, Discard', () => {
     expect(sh(dir, 'status', '--porcelain')).toBe('');
   });
 
-  it("Discard leaves a file alone when it changed again after Claude's edit", async () => {
+  it('refuses to apply a stale proposal and leaves the working copy untouched', async () => {
     const { dir, sync, job } = await started([{ file: 'src/Button.css', old: '#111111', new: '#2563EB' }]);
     writeFileSync(join(dir, 'src/Button.css'), 'hand edited\n');
-    const r = await sync.discard(job.id);
-    expect(r.skipped).toEqual(['src/Button.css']);
+    await expect(sync.keep(job.id)).rejects.toThrow(/changed after this proposal/);
+    expect(sync.discard(job.id).status).toBe('discarded');
     expect(readFileSync(join(dir, 'src/Button.css'), 'utf8')).toBe('hand edited\n');
+  });
+
+  it('only lists and applies a proposal in the original project and branch', async () => {
+    const dir = repo();
+    const other = repo();
+    let cwd = dir;
+    script([{ file: 'src/Button.css', old: '#111111', new: '#2563EB' }]);
+    const sync = new CodeSync({ claudePath: () => fake, cwd: () => cwd, send: () => undefined });
+    const job = sync.start([layer]);
+    await vi.waitFor(() => expect(job.status).toBe('review'), { timeout: 10000 });
+    cwd = other;
+    expect(sync.list(cwd)).toEqual([]);
+    await expect(sync.keep(job.id)).rejects.toThrow(/not in this project/);
+    cwd = dir;
+    sh(dir, 'switch', '-qc', 'variation');
+    await expect(sync.keep(job.id)).rejects.toThrow(/changed branches/);
+    expect(sh(dir, 'status', '--porcelain')).toBe('');
   });
 
   it('a job that changes nothing fails with what Claude said', async () => {

@@ -11,7 +11,7 @@ import { platform } from 'node:os';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { ClaudeCli, type CliMessage, type CliOptions } from './claudeCli.js';
 import type { DevProcess } from './project.js';
-import { freePort, planProject } from './setup.js';
+import { devLaunch, freePort, planProject } from './setup.js';
 import type { ToolServer } from './mcp.js';
 import type { ProjectProfile, RecipeCommand, RunRecipe, SetupActivity, SetupState, SetupTask, SetupTaskStatus } from '../shared/protocol.js';
 
@@ -267,7 +267,7 @@ export class ProjectRunner {
   }
 
   /** Starts setup for a project. `fresh` skips the saved recipe and asks Claude again. */
-  async start(cwd: string, opts: { fresh?: boolean } = {}): Promise<SetupState> {
+  async start(cwd: string, opts: { fresh?: boolean; localFirst?: boolean } = {}): Promise<SetupState> {
     const previous = this.run?.state;
     this.cancel();
     const run: Run = {
@@ -286,7 +286,28 @@ export class ProjectRunner {
       if (!err) return this.end(run, 'done');
       previousError = `Designer tried the saved way to run it (.designer/run.json) and it failed:\n${err}`;
     }
-    await this.askClaude(run, previousError);
+    if (opts.localFirst && !opts.fresh && !run.cancelled) {
+      const plan = await planProject(cwd);
+      const port = await freePort();
+      const launch = !plan.needsInstall && devLaunch(plan, port);
+      if (run.cancelled) return run.state;
+      if (launch) {
+        run.state.by = 'local';
+        this.setTask(run, 'app', 'Start the app', 'running', launch.command);
+        try {
+          const preview = await this.startPreview(run, { kind: 'app', cwd: plan.appDir, ...launch });
+          this.setTask(run, 'app', 'Start the app', 'done', preview.url);
+          run.state.profile = { summary: 'The app is ready to preview.', stack: plan.frameworkName, preview: 'app', components: 'app', notes: [] };
+          return this.end(run, 'done');
+        } catch (e) {
+          previousError = (e as Error).message;
+        }
+      }
+      return this.end(run, 'failed', previousError ?? (plan.needsInstall
+        ? 'Install the project dependencies and try again, or open a running app from Components.'
+        : 'Connect a running app from Components, or use Chat to work out how to start this project.'));
+    }
+    if (!run.cancelled) await this.askClaude(run, previousError);
     return run.state;
   }
 
@@ -361,6 +382,7 @@ export class ProjectRunner {
     if (!existsSync(dir)) throw new Error(`There is no folder ${a.cwd} in the project.`);
     const dev = a.kind === 'storybook' ? this.host.storybook : this.host.app;
     const port = await freePort();
+    if (run.cancelled) throw new Error('The preview was cancelled.');
     const env: Record<string, string> = { PORT: String(port), BROWSER: 'none', NO_COLOR: '1' };
     for (const [k, v] of Object.entries(a.env ?? {})) env[k] = sub(String(v), port);
     const command = sub(a.command, port);
@@ -371,6 +393,7 @@ export class ProjectRunner {
       async (r) => (a.kind === 'storybook' && r.ok ? `answers, with ${Object.keys(((await r.json().catch(() => ({}))) as { entries?: object }).entries ?? {}).length} stories` : `answers with HTTP ${r.status}`),
       (e: Error) => `did not answer yet (${e.name === 'TimeoutError' ? 'still compiling after 30s' : e.message})`,
     );
+    if (run.cancelled) return { url, answer };
     run.started[a.kind] = { command: a.command, cwd: relative(run.cwd, dir).replace(/\\/g, '/') || '.', ...(a.env && Object.keys(a.env).length ? { env: a.env } : {}) };
     if (a.kind === 'app') run.state.appUrl = url;
     else run.state.storybookUrl = url;

@@ -10,7 +10,7 @@ import { ClaudeSession } from './session.js';
 import { listSessions } from './transcripts.js';
 import { findTokens, updateToken } from './tokens.js';
 import { importVariables, pullFromFigma, setLink, tokenReport, useFigmaValue } from './designTokens.js';
-import { DevProcess, diffFor, findRunningStorybook, getLatest, gitStatus, listDir, projectInfo, readMemory, saveVersion, shareForReview, writeMemory } from './project.js';
+import { addSourceComponent, DevProcess, diffFor, findRunningStorybook, getLatest, gitStatus, listDir, projectInfo, readMemory, saveVersion, shareForReview, writeMemory } from './project.js';
 import { PreviewProxies } from './proxy.js';
 import { describeSetup, ProjectRunner } from './runner.js';
 import { planProject } from './setup.js';
@@ -39,7 +39,7 @@ export interface ServerOptions {
   workspace?: string;
   /** Where to look for Figma's desktop MCP server (tests point this at a stand-in). */
   figmaUrls?: string[];
-  /** Set up and run a project as soon as it is added (default true). */
+  /** Opt into running projects as soon as they are opened. */
   autoSetup?: boolean;
   /** The bundled demo project to copy from, if this build ships one. */
   demoDir?: string;
@@ -90,7 +90,7 @@ export async function startServer(opts: ServerOptions = {}) {
   });
   // Design -> code jobs, and the watcher that tells the canvas when code changed under it.
   const codeSync = new CodeSync({
-    claudePath: () => (claude.found ? claude.path : undefined),
+    claudePath: () => (claude.found && claude.loggedIn !== false ? claude.path : undefined),
     cwd: () => requireProject(),
     send: (job) => broadcast({ type: 'sync', job }),
     model: () => session?.model,
@@ -174,7 +174,7 @@ export async function startServer(opts: ServerOptions = {}) {
     return comments;
   }
 
-  async function openProject(path: string, byClaude = false, autoRun = opts.autoSetup !== false) {
+  async function openProject(path: string, byClaude = false, autoRun = opts.autoSetup === true) {
     const p = await realpath(resolve(path)).catch(() => resolve(path));
     if (!(await stat(p).then((s) => s.isDirectory(), () => false))) throw new HttpError(400, `${p} is not a folder`);
     const isNew = p !== projectPath;
@@ -195,8 +195,8 @@ export async function startServer(opts: ServerOptions = {}) {
     return info;
   }
 
-  function autoSetup(p: string, fresh = false) {
-    return setup.start(p, { fresh });
+  function autoSetup(p: string, fresh = false, localFirst = false) {
+    return setup.start(p, { fresh, localFirst });
   }
 
   async function askCanvas(op: CanvasOp): Promise<unknown> {
@@ -251,7 +251,9 @@ export async function startServer(opts: ServerOptions = {}) {
       const scripts = Object.entries(info.scripts).map(([k, v]) => `  ${k}: ${v}`).join('\n') || '  (none)';
       const comps = info.components.slice(0, 40).map((c) => `  ${c.name} (${c.file}${c.storyIds.length ? `, stories: ${c.storyIds.join(', ')}` : ', no story'})`).join('\n');
       const s = setup.state;
-      const how = s && s.project === info.path && s.status !== 'running' ? describeSetup(s) : 'Designer is now getting it running by itself (a separate Claude Code run reads the repo and starts it). You will get a note with what it found; do not start it again unless the user asks.';
+      const how = s?.project === info.path
+        ? s.status === 'running' ? 'A preview setup is running.' : describeSetup(s)
+        : 'The component inventory is ready. Start a preview only if the task needs one.';
       return `Opened ${info.path}. ${how}\nComponents (${info.components.length}):\n${comps || '  (none found)'}\nGit: ${info.git.isRepo ? `${info.git.branch ?? ''}${info.git.remote ? ` (remote ${info.git.remote})` : ' (no remote)'}` : 'not a git repository'}\nScripts:\n${scripts}\nStorybook stories: ${info.stories.reduce((n, s) => n + s.stories.length, 0)} in ${info.stories.length} files.\nNote: your own working folder is still ${session?.cwd ?? home()}; use absolute paths or cd into the project.`;
     },
     runProject: async (command, kind) => {
@@ -328,7 +330,7 @@ export async function startServer(opts: ServerOptions = {}) {
     'POST /api/demo': async (body) => {
       if (!opts.demoDir) throw new HttpError(404, 'The demo project is not bundled with this copy of Designer.');
       const { path, created } = await installDemo(opts.demoDir, workspace, { fresh: body.fresh === true });
-      const info = await openProject(path);
+      const info = await openProject(path, false, typeof body.setup === 'boolean' ? body.setup : undefined);
       return { ...info, created };
     },
     'POST /api/claude/recheck': async () => {
@@ -336,7 +338,7 @@ export async function startServer(opts: ServerOptions = {}) {
       return claude;
     },
     'GET /api/fs': async (_b, url) => listDir(resolve(url.searchParams.get('path') || homedir())),
-    'POST /api/project': async (body) => openProject(String(body.path ?? ''), false, body.setup === false ? false : undefined),
+    'POST /api/project': async (body) => openProject(String(body.path ?? ''), false, typeof body.setup === 'boolean' ? body.setup : undefined),
     'POST /api/project/close': async () => {
       setup.cancel();
       broadcast({ type: 'setup', setup: null });
@@ -352,12 +354,18 @@ export async function startServer(opts: ServerOptions = {}) {
     'POST /api/project/setup': async (body) => {
       const p = requireProject();
       // Answers right away; progress streams over the socket.
-      void autoSetup(p, body.fresh === true);
+      void autoSetup(p, body.fresh === true, body.localFirst === true);
       await new Promise((r) => setTimeout(r, 50));
       return setup.state ?? null;
     },
     'GET /api/project/plan': async () => planProject(requireProject()),
     'GET /api/components': async () => (await projectInfo(requireProject())).components,
+    'POST /api/components': async (body) => {
+      const project = requireProject();
+      if (body.project !== project) throw new HttpError(409, 'The open project changed. Open the component form again.');
+      await addSourceComponent(project, { name: String(body.name ?? '').trim(), file: String(body.file ?? '').trim(), exportName: String(body.exportName ?? '').trim() });
+      return projectInfo(project);
+    },
     'GET /api/capabilities': async () => capsCache ?? capabilities(),
     'POST /api/capabilities/refresh': async () => capabilities(),
     'GET /api/sessions': async () => {
@@ -427,7 +435,7 @@ export async function startServer(opts: ServerOptions = {}) {
       const change = r.ok ? await headWatcher.check('pull') : null;
       return { ...r, files: change?.files ?? [] };
     },
-    'GET /api/sync': async () => codeSync.list(),
+    'GET /api/sync': async () => codeSync.list(projectPath),
     'POST /api/sync/to-code': async (body) => {
       requireProject();
       return codeSync.start((body.layers ?? []) as LayerSync[]);
@@ -475,7 +483,8 @@ export async function startServer(opts: ServerOptions = {}) {
     'GET /api/run': async () => ({ app: app.url ?? null, storybook: storybook.url ?? null }),
     'GET /api/preview': async (_b, url) => ({ src: await proxies.url(String(url.searchParams.get('url') ?? '')) }),
     'GET /api/story-src': async (_b, url) => {
-      const sb = await storybookUrl();
+      const sb = url.searchParams.get('start') === 'false' ? storybook.url : await storybookUrl();
+      if (!sb) throw new HttpError(409, 'Start Storybook to compare this design with the rendered component.');
       return { src: await proxies.url(`${sb}/iframe.html?id=${encodeURIComponent(String(url.searchParams.get('id') ?? ''))}&viewMode=story`) };
     },
     'GET /api/canvas': async () => {

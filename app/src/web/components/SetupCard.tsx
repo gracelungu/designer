@@ -11,7 +11,7 @@ const host = (url?: string) => url?.replace(/^https?:\/\//, '');
  * tasks, what it is doing right now, and (on demand) every command it ran. Once the project runs it
  * folds into a one-line summary of what Claude found; on failure it says why and offers a fix.
  */
-export function SetupCard({ setup, reveal, onRetry, onAsk }: { setup: SetupState | null; reveal: number; onRetry: (fresh: boolean) => void; onAsk: (prompt: string) => void }) {
+export function SetupCard({ setup, agentReady, reveal, onRetry, onAgentSetup }: { setup: SetupState | null; agentReady: boolean; reveal: number; onRetry: (fresh: boolean) => void; onAgentSetup: () => void }) {
   const [hidden, setHidden] = useState(false);
   const [open, setOpen] = useState(true);
   const [log, setLog] = useState(false);
@@ -37,13 +37,12 @@ export function SetupCard({ setup, reveal, onRetry, onAsk }: { setup: SetupState
   const now = [...setup.activity].reverse().find((a) => a.status === 'running');
   const title =
     setup.status === 'running'
-      ? setup.by === 'saved'
+      ? setup.by !== 'claude'
         ? 'Starting your project'
         : 'Claude is getting your project running'
       : setup.status === 'failed'
         ? 'Setup needs a hand'
         : 'Project is running';
-  const failed = setup.tasks.find((t) => t.status === 'failed');
   const seconds = Math.round(((setup.finishedAt ?? Date.now()) - setup.startedAt) / 1000);
 
   return (
@@ -82,7 +81,7 @@ export function SetupCard({ setup, reveal, onRetry, onAsk }: { setup: SetupState
             <div className="setup-where">
               {setup.appUrl && <span>App <span className="mono">{host(setup.appUrl)}</span></span>}
               {setup.storybookUrl && <span>Storybook <span className="mono">{host(setup.storybookUrl)}</span></span>}
-              {p && <span className="faint">{p.components === 'storybook' ? 'Components place from stories' : 'Edits show in the app frame'}</span>}
+              {p?.components === 'storybook' && <span className="faint">Story previews are available in Components</span>}
             </div>
           )}
           {setup.status === 'done' && p?.notes.length ? (
@@ -115,23 +114,16 @@ export function SetupCard({ setup, reveal, onRetry, onAsk }: { setup: SetupState
             <>
               {setup.error && <pre className="setup-error">{setup.error}</pre>}
               <div className="setup-actions">
-                <button className="btn small" onClick={() => onRetry(true)}>Try again</button>
-                <button
-                  className="btn small primary"
-                  onClick={() =>
-                    onAsk(
-                      `Designer's setup could not get this project running${failed ? ` (the step "${failed.label}" failed)` : ''}. It said:\n\n${setup.error ?? ''}\n\nFind out why and fix it, following the repo's own tooling, then start it with run_project so it shows on the canvas. Ask me if it needs something only I can give (like a secret).`,
-                    )
-                  }
-                >
-                  Ask Claude to fix it
+                <button className="btn small" onClick={() => onRetry(false)}>Try again</button>
+                <button className="btn small primary" onClick={() => agentReady ? onRetry(true) : onAgentSetup()}>
+                  {agentReady ? 'Set up with Claude' : 'Open Chat setup'}
                 </button>
               </div>
             </>
           )}
           {setup.status === 'done' && (
             <div className="setup-actions">
-              <button className="btn small" onClick={() => onRetry(true)} title="Ask Claude to work out how it runs again">Set up again</button>
+              <button className="btn small" onClick={() => onRetry(agentReady)}>{agentReady ? 'Set up with Claude' : 'Restart preview'}</button>
             </div>
           )}
         </>

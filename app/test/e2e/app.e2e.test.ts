@@ -1,7 +1,7 @@
 // Drives the built Designer UI in Chromium, like a designer would, from first launch
 // through the demo project, chat, tokens, canvas, Figma and versions.
 // Claude Code is the stand-in at test/fixtures/fake-claude.mjs.
-import { existsSync, mkdtempSync, readFileSync, realpathSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { chromium, type Browser, type Page } from 'playwright';
@@ -43,34 +43,12 @@ afterAll(async () => {
 });
 
 describe('first run onboarding', () => {
-  it('welcomes a new designer', async () => {
+  it('lets you open a project, sketch or try the demo from one screen', async () => {
     await page.getByRole('heading', { name: 'Welcome to Designer' }).waitFor();
-    expect(await page.getByLabel('Step 1 of 4').count()).toBe(1);
+    expect(await page.getByRole('button', { name: 'Open a project', exact: true }).count()).toBe(1);
+    expect(await page.getByRole('button', { name: 'Start with a blank canvas', exact: true }).count()).toBe(1);
     await shot('01-welcome');
-    await page.getByRole('button', { name: 'Get started' }).click();
-  });
-
-  it('checks Claude Code is installed and signed in', async () => {
-    await page.getByRole('heading', { name: 'Connect Claude Code' }).waitFor();
-    await expect.poll(() => page.getByTestId('claude-check').innerText()).toContain('Found Claude Code 9.9.9');
-    await page.getByRole('button', { name: 'Continue' }).click();
-  });
-
-  it('offers Figma as optional, and goes back and forth', async () => {
-    await page.getByRole('heading', { name: 'Bring in Figma (optional)' }).waitFor();
-    await expect.poll(() => page.getByTestId('figma-check').innerText(), { timeout: 15000 }).toMatch(/Figma isn’t connected|Figma is connected/);
-    await page.getByRole('button', { name: 'Back' }).click();
-    await page.getByRole('heading', { name: 'Connect Claude Code' }).waitFor();
-    await page.getByRole('button', { name: 'Continue' }).click();
-    await shot('02-figma-step');
-    await page.getByRole('button', { name: /^(Skip|Continue)$/ }).click();
-  });
-
-  it('starts with the demo project selected', async () => {
-    await page.getByRole('heading', { name: 'How would you like to start?' }).waitFor();
-    expect(await page.getByRole('radio', { name: /Try the demo project/ }).isChecked()).toBe(true);
-    await shot('03-start-choice');
-    await page.getByRole('button', { name: 'Open Designer' }).click();
+    await page.getByRole('button', { name: 'Try the demo', exact: true }).click();
   });
 
   it('opens a copy of the demo with its components', async () => {
@@ -235,30 +213,52 @@ describe('Mac app updates', () => {
 });
 
 describe('without Claude Code', () => {
-  it('onboarding tells the designer how to install it', async () => {
+  it('opens a custom component project and prepares a manual handoff without Claude or Storybook', async () => {
     const saved = process.env.DESIGNER_CLAUDE_PATH;
     const savedPath = process.env.PATH;
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), 'designer-custom-')));
+    writeFileSync(join(dir, 'badge.html'), '<span class="badge">Badge</span>');
     process.env.DESIGNER_CLAUDE_PATH = '/nonexistent/claude';
     process.env.PATH = '/nonexistent';
-    const bare = await startServer({ workspace: join(realpathSync(mkdtempSync(join(tmpdir(), 'designer-e2e-'))), 'Designer'), staticDir: STATIC });
+    const bare = await startServer({ workspace: join(dir, 'Designer'), staticDir: STATIC });
     process.env.DESIGNER_CLAUDE_PATH = saved;
     process.env.PATH = savedPath;
     try {
-      const p = await openPage(bare.url);
-      await p.getByRole('button', { name: 'Get started' }).click();
-      const check = p.getByTestId('claude-check');
-      // On a machine with Claude Code in a well-known place, it is found anyway.
-      await expect.poll(() => check.innerText()).toMatch(/isn’t installed yet|Found/);
-      if ((await check.innerText()).includes('isn’t installed')) {
-        expect(await check.innerText()).toContain('curl -fsSL https://claude.ai/install.sh | bash');
-        await p.getByRole('button', { name: 'Skip for now' }).click();
-        await p.getByRole('button', { name: /^(Skip|Continue)$/ }).click();
-        // No demo in this build, so "my own project" is the default.
-        expect(await p.getByRole('radio', { name: /Try the demo project/ }).count()).toBe(0);
-        await p.getByRole('radio', { name: /blank canvas/ }).check();
-        await p.getByRole('button', { name: 'Open Designer' }).click();
-        await p.getByRole('heading', { name: 'Claude Code is not installed' }).waitFor();
-      }
+      const p = await openPage(bare.url, () => {
+        Object.defineProperty(window, 'designerNative', { value: {
+          isElectron: true,
+          pickFolder: async () => window.localStorage.getItem('test-project'),
+          openExternal: () => undefined,
+        } });
+      });
+      await p.evaluate((path) => localStorage.setItem('test-project', path), dir);
+      await p.getByRole('button', { name: 'Open a project', exact: true }).click();
+      await p.getByRole('button', { name: 'Choose folder…' }).click();
+      await p.getByRole('button', { name: 'Add source', exact: true }).click();
+      await p.getByRole('textbox', { name: 'Component name' }).fill('Template Badge');
+      await p.getByRole('textbox', { name: 'File path in the project' }).fill('badge.html');
+      await p.getByRole('button', { name: 'Add component' }).click();
+      await p.getByRole('textbox', { name: 'Search components' }).fill('badge.html');
+      await p.getByText('Template Badge', { exact: true }).waitFor();
+      const session = await fetch(`${bare.url}/api/project/setup`, { headers: { 'x-designer-token': bare.token } });
+      expect(await session.json()).toBeNull();
+      await p.getByRole('button', { name: /Add editable frame/ }).click();
+      await p.getByRole('tab', { name: 'Code' }).click();
+      await p.getByText('Design layer linked to source').waitFor();
+      await p.evaluate(() => {
+        const { store } = (window as unknown as { __designer: { host: { editor: { store: import('../../../editor/src/index.js').Store } } } }).__designer.host.editor;
+        store.transact(() => { store.selected()[0].radius = 12; });
+      });
+      await p.getByRole('button', { name: 'Review design changes' }).click();
+      await p.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+      await p.getByRole('button', { name: 'Copy changes' }).click();
+      await p.getByRole('button', { name: 'Copied' }).waitFor();
+      expect(await p.evaluate(() => navigator.clipboard.readText())).toContain('badge.html');
+      expect(await p.getByRole('button', { name: 'Propose code change' }).count()).toBe(0);
+      await p.getByRole('button', { name: 'Mark implemented' }).click();
+      await p.getByTestId('sync-pending').waitFor({ state: 'detached' });
+      await p.getByRole('button', { name: 'Chat', exact: true }).click();
+      await p.getByRole('heading', { name: 'Claude Code is not installed' }).waitFor();
       await p.context().close();
     } finally {
       bare.close();

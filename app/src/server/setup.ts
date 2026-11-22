@@ -480,18 +480,17 @@ export function parseSvelteProps(src: string): ComponentProp[] {
   }));
 }
 
-/** Pairs a component with the stories that render it: same folder and name, or a story titled after it. */
-function storiesFor(file: string, name: string, stories: StoryEntry[]) {
-  const dir = dirname(file);
-  const base = basename(file, extname(file));
-  return stories
-    .filter((s) => {
-      const sBase = basename(s.file).replace(/\.stories\.[jt]sx?$/, '');
-      const sameFile = dirname(s.file) === dir && (sBase === base || sBase === name);
-      const titled = s.title.split('/').pop()?.replace(/\s+/g, '') === name;
-      return sameFile || titled;
-    })
-    .flatMap((s) => s.stories.map((x) => x.id));
+/** Associate each story with one source when the file or title identifies it. */
+function linkStories(components: ComponentEntry[], stories: StoryEntry[]) {
+  for (const story of stories) {
+    const dir = dirname(story.file);
+    const base = basename(story.file).replace(/\.stories\.[jt]sx?$/, '');
+    const title = story.title.split('/').pop()?.replace(/\s+/g, '');
+    const beside = components.filter((c) => dirname(c.file) === dir && (c.name === base || basename(c.file, extname(c.file)) === base));
+    const named = (beside.length ? beside : components).filter((c) => c.name === title);
+    const matches = named.length ? named : beside;
+    if (matches.length === 1) matches[0].storyIds.push(...story.stories.map((entry) => entry.id));
+  }
 }
 
 /**
@@ -512,13 +511,14 @@ export async function indexComponents(cwd: string, stories: StoryEntry[] = []): 
       const name = basename(file, ext);
       if (!isPascal(name)) continue;
       const props = ext === '.vue' ? parseVueProps(src) : parseSvelteProps(src);
-      out.push({ name, file, exportName: 'default', framework: ext === '.vue' ? 'vue' : 'svelte', props, storyIds: storiesFor(file, name, stories) });
+      out.push({ name, file, exportName: 'default', framework: ext === '.vue' ? 'vue' : 'svelte', props, storyIds: [] });
       continue;
     }
     for (const c of parseReactComponents(src)) {
-      out.push({ name: c.name, file, exportName: c.exportName, framework: 'react', props: c.props, storyIds: storiesFor(file, c.name, stories) });
+      out.push({ name: c.name, file, exportName: c.exportName, framework: 'react', props: c.props, storyIds: [] });
     }
     if (out.length >= 1000) break;
   }
+  linkStories(out, stories);
   return out.sort((a, b) => a.name.localeCompare(b.name) || a.file.localeCompare(b.file));
 }

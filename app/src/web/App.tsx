@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
-import type { Capabilities, ClaudeInstall, ProjectInfo, SetupState, VisualReview } from '../shared/protocol';
+import type { Capabilities, ClaudeInstall, ComponentEntry, ProjectInfo, SetupState, VisualReview } from '../shared/protocol';
 import { api, socket } from './api';
 import { chatReducer, initialChat } from './store';
 import { Chat, Menu, Spark, type CanvasContext, type Prefs } from './components/Chat';
@@ -50,23 +50,18 @@ export function App() {
   if (!status) return <div className="welcome">Starting Designer…</div>;
   if (!status.onboarded)
     return (
-      <Onboarding
-        claude={status.claude}
-        demo={status.demo}
-        onDone={(choice, claude) => {
-          setStart(choice);
-          setStatus({ ...status, claude, onboarded: true });
-        }}
-      />
+      <Onboarding demo={status.demo} onDone={(choice) => {
+        setStart(choice);
+        setStatus({ ...status, onboarded: true });
+      }} />
     );
-  if (!status.claude.found || !status.claude.loggedIn) return <ClaudeSetup status={status} onRecheck={(c) => setStatus({ ...status, claude: c })} />;
-  return <Workspace status={status} start={start} />;
+  return <Workspace status={status} start={start} onRecheck={(claude) => setStatus({ ...status, claude })} />;
 }
 
 function ClaudeSetup({ status, onRecheck }: { status: Status; onRecheck: (c: ClaudeInstall) => void }) {
   const c = status.claude;
   return (
-    <div className="welcome">
+    <div className="chat-setup">
       <div className="card">
         <Logo />
         <h2 style={{ marginTop: 10 }}>{!c.found ? 'Claude Code is not installed' : 'Sign in to Claude Code'}</h2>
@@ -92,20 +87,23 @@ function ClaudeSetup({ status, onRecheck }: { status: Status; onRecheck: (c: Cla
 type LeftTab = 'chat' | 'layers' | 'components' | 'comments' | 'versions';
 type ChatView = 'chat' | 'history' | 'claude';
 
-function Workspace({ status, start }: { status: Status; start?: StartChoice }) {
+function Workspace({ status, start, onRecheck }: { status: Status; start?: StartChoice; onRecheck: (claude: ClaudeInstall) => void }) {
   const [chat, dispatch] = useReducer(chatReducer, initialChat);
   const [project, setProject] = useState<ProjectInfo | null>(null);
   const [setup, setSetup] = useState<SetupState | null>(null);
   const [revealSetup, setRevealSetup] = useState(0);
   const [caps, setCaps] = useState<Capabilities>();
   const [capsError, setCapsError] = useState('');
-  const [left, setLeft] = useState<LeftTab>('chat');
+  const [left, setLeft] = useState<LeftTab>('layers');
   const [chatView, setChatView] = useState<ChatView>('chat');
   const [side, setSide] = useState<'figma' | 'code'>('figma');
   const [codeTab, setCodeTab] = useState<'layer' | 'tokens' | 'changes'>('changes');
   const tokens = useTokenReport();
   const drift = tokens.report?.summary.drift ?? 0;
   const [modal, setModal] = useState<'save' | 'share' | 'figma' | 'project' | null>(null);
+  const [workspaceReady, setWorkspaceReady] = useState(false);
+  const [openingProject, setOpeningProject] = useState(false);
+  const openingId = useRef(0);
   const [projectMenu, setProjectMenu] = useState(false);
   const [reviews, setReviews] = useState<VisualReview[]>([]);
   const [viewing, setViewing] = useState<VisualReview>();
@@ -137,7 +135,10 @@ function Workspace({ status, start }: { status: Status; start?: StartChoice }) {
     return api<Capabilities>(refresh ? '/api/capabilities/refresh' : '/api/capabilities', refresh ? {} : undefined).then(setCaps, (e: Error) => setCapsError(e.message));
   }, []);
 
-  const refreshProject = useCallback(() => api<ProjectInfo | null>('/api/project').then(setProject), []);
+  const refreshProject = useCallback(async () => {
+    const next = await api<ProjectInfo | null>('/api/project');
+    setProject((current) => current?.path === next?.path ? next : current);
+  }, []);
 
   // Start-up: reopen the last project quietly if there was one (never ask), then start Claude Code.
   useEffect(() => {
@@ -148,7 +149,11 @@ function Workspace({ status, start }: { status: Status; start?: StartChoice }) {
         if (m.project) lsSet('designer.lastProject', m.project.path);
         else lsDel('designer.lastProject');
         setRunning({});
-        void host.load();
+        setSyncOpen(false);
+        void sync.openProject(m.project?.path ?? null);
+        const id = ++openingId.current;
+        setOpeningProject(true);
+        void host.load().finally(() => { if (id === openingId.current) setOpeningProject(false); });
         void api<VisualReview[]>('/api/visual-reviews').then(setReviews, () => setReviews([]));
         return;
       }
@@ -171,7 +176,7 @@ function Workspace({ status, start }: { status: Status; start?: StartChoice }) {
         return;
       }
       if (m.type === 'sync') {
-        sync.onJob(m.job);
+        if (!sync.onJob(m.job)) return;
         if (m.job.status === 'review') {
           setSide('code');
           setSyncOpen(true);
@@ -198,29 +203,36 @@ function Workspace({ status, start }: { status: Status; start?: StartChoice }) {
       if (m.type === 'item' && m.item.kind === 'result') void refreshProject();
     });
     (async () => {
-      const last = status.project ?? lsGet('designer.lastProject');
+      let path = status.project;
+      const last = path ?? lsGet('designer.lastProject');
       if (start === 'demo') {
         try {
-          setProject(await api<ProjectInfo>('/api/demo', {}));
+          const info = await api<ProjectInfo>('/api/demo', { setup: false });
+          path = info.path;
+          setProject(info);
           setLeft('components');
         } catch (e) {
           setToast({ text: (e as Error).message });
         }
       } else if (start === 'project') setModal('project');
-      else if (last) {
+      else if (start === 'blank' && path) {
+        await api('/api/project/close', {});
+        path = null;
+      } else if (!start && last) {
         try {
-          setProject(await api<ProjectInfo>('/api/project', { path: last }));
+          const info = await api<ProjectInfo>('/api/project', { path: last, setup: false });
+          path = info.path;
+          setProject(info);
         } catch {
           lsDel('designer.lastProject');
         }
       }
       await host.load();
-      void sync.loadJobs();
+      void sync.openProject(path);
       void api<VisualReview[]>('/api/visual-reviews').then(setReviews, () => undefined);
       const r = await api<{ app: string | null; storybook: string | null }>('/api/run').catch(() => ({ app: null, storybook: null }));
       setRunning(r);
-      socket.send({ type: 'start', model: prefs.model, effort: prefs.effort, mode: prefs.mode });
-      setTimeout(() => void loadCaps(), 400);
+      setWorkspaceReady(true);
     })();
     return () => {
       off();
@@ -228,10 +240,27 @@ function Workspace({ status, start }: { status: Status; start?: StartChoice }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const agentReady = Boolean(status.claude.found && status.claude.loggedIn);
+  const agentStarted = useRef(false);
+  useEffect(() => {
+    if (!workspaceReady || !agentReady || agentStarted.current) return;
+    agentStarted.current = true;
+    socket.send({ type: 'start', model: prefs.model, effort: prefs.effort, mode: prefs.mode });
+    setTimeout(() => void loadCaps(), 400);
+  }, [workspaceReady, agentReady, prefs, loadCaps]);
+
+  useEffect(() => {
+    const showChat = () => { setLeft('chat'); setChatView('chat'); };
+    window.addEventListener('designer:focus-chat', showChat);
+    return () => window.removeEventListener('designer:focus-chat', showChat);
+  }, []);
+
   // Live renders come back when their server is running again.
   useEffect(() => {
+    if (openingProject) return;
     if (running.storybook || running.app) void reconnectLive(host, running);
-  }, [running, host]);
+    if (running.storybook) sync.recordUnmeasured();
+  }, [running, host, sync, openingProject]);
 
   // Keep Claude and the chat's selection chip in step with the canvas.
   useEffect(() => {
@@ -266,6 +295,7 @@ function Workspace({ status, start }: { status: Status; start?: StartChoice }) {
   const ask = (text: string, withSelection = true) => {
     setLeft('chat');
     setChatView('chat');
+    if (!agentReady) return;
     const ctx = withSelection ? host.context() : undefined;
     socket.send({ type: 'prompt', text, context: ctx?.text });
   };
@@ -342,8 +372,21 @@ function Workspace({ status, start }: { status: Status; start?: StartChoice }) {
   }
   const openTokens = () => (setSide('code'), setCodeTab('tokens'));
 
+  const openSync = () => { setSide('code'); setSyncOpen(true); };
+  const runPreview = async (fresh = false) => {
+    await api('/api/project/setup', { fresh, localFirst: true });
+    setRevealSetup((n) => n + 1);
+  };
+  const placeDesign = async (component: ComponentEntry) => {
+    await host.apply({
+      kind: 'add-nodes',
+      nextToSelection: true,
+      nodes: [{ type: 'frame', name: component.name, w: 240, h: 120, codeLink: { file: component.file, exportName: component.exportName || undefined, storyId: component.storyIds[0] } }],
+    });
+  };
+
   const codePanel = (
-    <CodePanel editor={editor} stories={project?.stories ?? []} onAsk={(p) => (p.endsWith(': ') ? (setLeft('chat'), setChatView('chat'), window.dispatchEvent(new CustomEvent('designer:focus-chat'))) : ask(p))} onShowStory={(id, next) => void placeStory(id, next)} />
+    <CodePanel editor={editor} stories={project?.stories ?? []} components={project?.components ?? []} onReview={openSync} onAsk={(p) => (p.endsWith(': ') ? (setLeft('chat'), setChatView('chat'), window.dispatchEvent(new CustomEvent('designer:focus-chat'))) : ask(p))} onShowStory={(id, next) => void placeStory(id, next)} />
   );
   const openComments = host.comments().filter((c) => !c.resolved).length;
 
@@ -394,8 +437,8 @@ function Workspace({ status, start }: { status: Status; start?: StartChoice }) {
               <button className="opt" onClick={() => (setModal('project'), setProjectMenu(false))}>
                 <span>Open another project…</span>
               </button>
-              <button className="opt" onClick={() => (void api('/api/project/setup', {}), setRevealSetup((n) => n + 1), setProjectMenu(false))}>
-                <span>Run it again</span>
+              <button className="opt" onClick={() => { setProjectMenu(false); void runPreview().catch((e: Error) => setToast({ text: e.message })); }}>
+                <span>Run preview</span>
               </button>
               {setup && (
                 <button className="opt" onClick={() => (setRevealSetup((n) => n + 1), setProjectMenu(false))}>
@@ -405,7 +448,7 @@ function Workspace({ status, start }: { status: Status; start?: StartChoice }) {
               <button className="opt" onClick={() => (exportPreview().catch((e: Error) => setToast({ text: e.message })), setProjectMenu(false))}>
                 <span>Export design preview</span>
               </button>
-              <button className="opt" onClick={() => (void api('/api/project/close', {}), setProjectMenu(false))}>
+              <button className="opt" onClick={() => { setProjectMenu(false); void host.flush().then(() => api('/api/project/close', {})).catch((e: Error) => setToast({ text: e.message })); }}>
                 <span>Close project</span>
               </button>
             </Menu>
@@ -441,14 +484,15 @@ function Workspace({ status, start }: { status: Status; start?: StartChoice }) {
           </div>
           {capsError && left === 'chat' && <div className="error-box" style={{ margin: 8 }}>{capsError}</div>}
           <div className={`pane ${left === 'chat' ? '' : 'hidden'}`}>
-            {chatView === 'chat' && <Chat chat={chat} caps={caps} prefs={prefs} onChoose={choose} context={context} hasProject={!!project} suggestions={suggestions} header={chatHeader} />}
-            {chatView === 'history' && (
+            {!agentReady && left === 'chat' && <ClaudeSetup status={status} onRecheck={onRecheck} />}
+            {agentReady && chatView === 'chat' && <Chat chat={chat} caps={caps} prefs={prefs} onChoose={choose} context={context} hasProject={!!project} suggestions={suggestions} header={chatHeader} />}
+            {agentReady && chatView === 'history' && (
               <div className="chat" data-canvas-keys="off">
                 {chatHeader}
                 <SessionsPanel session={s} onResume={(id) => newChat(id)} />
               </div>
             )}
-            {chatView === 'claude' && (
+            {agentReady && chatView === 'claude' && (
               <div className="chat" data-canvas-keys="off">
                 {chatHeader}
                 <ClaudePanel caps={caps} onRefresh={() => loadCaps(true)} />
@@ -470,7 +514,22 @@ function Workspace({ status, start }: { status: Status; start?: StartChoice }) {
             />
           </div>
           <div className={`pane ${left === 'components' ? '' : 'hidden'}`} data-canvas-keys="off">
-            <ComponentsPanel project={project} profile={setup?.project === project?.path ? setup?.profile : undefined} storybookRunning={!!running.storybook} onPlace={(id) => placeStory(id)} onAsk={(p) => ask(p, false)} onAddProject={() => setModal('project')} />
+            <ComponentsPanel
+              key={project?.path}
+              project={project}
+              running={setup?.status === 'running'}
+              opening={openingProject || !workspaceReady}
+              onPlace={placeStory}
+              onDesign={placeDesign}
+              onRun={runPreview}
+              onAttach={async (url) => { await host.showPage(url); }}
+              onRefresh={refreshProject}
+              onAddSource={async (values) => {
+                const next = await api<ProjectInfo>('/api/components', { ...values, project: project?.path });
+                setProject((current) => current?.path === next.path ? next : current);
+              }}
+              onAddProject={() => setModal('project')}
+            />
           </div>
           <div className={`pane ${left === 'versions' ? '' : 'hidden'}`}>
             {left === 'versions' && <VersionsPanel hasProject={!!project} onToast={setToast} onAsk={(p) => ask(p, false)} />}
@@ -479,9 +538,9 @@ function Workspace({ status, start }: { status: Status; start?: StartChoice }) {
 
         <main className="stage">
           <Adopt el={host.stage} className="stage-host" />
-          <SyncBar sync={sync} onOpen={() => (setSide('code'), setSyncOpen(true))} />
+          <SyncBar sync={sync} onOpen={openSync} />
           <CanvasHint editor={editor} onFigma={() => setModal('figma')} onComponents={() => setLeft('components')} />
-          <SetupCard setup={setup} reveal={revealSetup} onRetry={(fresh) => void api('/api/project/setup', { fresh }).catch(() => undefined)} onAsk={(p) => ask(p, false)} />
+          <SetupCard setup={setup} agentReady={agentReady} reveal={revealSetup} onRetry={(fresh) => void runPreview(fresh).catch((e: Error) => setToast({ text: e.message }))} onAgentSetup={() => setLeft('chat')} />
         </main>
 
         <aside className="side right">
@@ -512,7 +571,10 @@ function Workspace({ status, start }: { status: Status; start?: StartChoice }) {
           </div>
           <div className={`pane ${side === 'code' ? '' : 'hidden'}`} data-canvas-keys="off">
             {syncOpen ? (
-              <SyncPanel sync={sync} onClose={() => setSyncOpen(false)} onSelect={(id) => (editor.store.select([id]), editor.zoomToSelection())} />
+              <SyncPanel sync={sync} agentReady={agentReady} onClose={() => setSyncOpen(false)} onSelect={(id) => {
+                editor.store.select([id]);
+                editor.zoomToSelection();
+              }} />
             ) : project ? (
               <>
                 <div className="tabs sub">
@@ -553,12 +615,16 @@ function Workspace({ status, start }: { status: Status; start?: StartChoice }) {
               home={status.home}
               current={project?.path}
               onDemo={status.demo ? async () => {
-                await api<ProjectInfo>('/api/demo', {});
+                await host.flush();
+                await api<ProjectInfo>('/api/demo', { setup: false });
+                setLeft('components');
                 setModal(null);
               } : undefined}
               onCancel={() => setModal(null)}
               onOpen={async (path) => {
-                await api<ProjectInfo>('/api/project', { path });
+                await host.flush();
+                await api<ProjectInfo>('/api/project', { path, setup: false });
+                setLeft('components');
                 setModal(null);
               }}
             />

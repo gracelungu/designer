@@ -1,4 +1,4 @@
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -214,6 +214,19 @@ describe('indexComponents on fixture repos', () => {
     const list = await indexComponents(fx('sveltekit-bun'));
     expect(list.map((c) => c.name)).toEqual(['Chip', 'Legacy']);
     expect(list[1].props.map((p) => p.name)).toEqual(['name', 'count']);
+  });
+  it('keeps a nearby story with its component when packages reuse the same name', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'designer-story-owner-'));
+    for (const pkg of ['shop', 'admin']) {
+      mkdirSync(join(dir, pkg));
+      writeFileSync(join(dir, pkg, 'Badge.tsx'), 'export function Badge() { return <span />; }');
+    }
+    writeFileSync(join(dir, 'shop', 'Badge.stories.tsx'), "export default { title: 'Shop/Badge' };\nexport const Primary = {};");
+    const components = await indexComponents(dir, await findStories(dir));
+    expect(components.map(({ file, storyIds }) => [file, storyIds])).toEqual([
+      ['admin/Badge.tsx', []],
+      ['shop/Badge.tsx', ['shop-badge--primary']],
+    ]);
   });
   it('monorepo packages are indexed too', async () => {
     expect(await names('monorepo-pnpm')).toEqual(['Tag@packages/ui/src/Tag.tsx']);

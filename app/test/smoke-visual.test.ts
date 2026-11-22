@@ -85,6 +85,7 @@ describe.skipIf(!browserPath || !existsSync(join(web, 'index.html')))('smoke: vi
   };
 
   it('takes before and after pictures when Claude changes a component', async () => {
+    await page.getByRole('button', { name: 'Chat', exact: true }).click();
     const box = page.locator('textarea');
     await box.waitFor({ timeout: 20000 });
     // Wait until Claude Code has started and reported its models (the model menu turns on).

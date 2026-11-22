@@ -2,8 +2,9 @@
 // held as a reviewable proposal (Keep or Discard). Code -> design: watches the project's HEAD so a pull,
 // a commit or a branch switch tells the canvas which files changed under it.
 import { randomUUID } from 'node:crypto';
-import { readFile, unlink, writeFile } from 'node:fs/promises';
-import { isAbsolute, relative, resolve, sep } from 'node:path';
+import { cp, link, lstat, mkdir, mkdtemp, readFile, rename, rm, unlink, writeFile } from 'node:fs/promises';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { tmpdir } from 'node:os';
 import { ClaudeCli, type CliMessage, type CliOptions } from './claudeCli.js';
 import { git } from './project.js';
 import type { CodeChange, LayerSync, SyncFile, SyncJob } from '../shared/protocol.js';
@@ -45,7 +46,7 @@ export const SYNC_SYSTEM_PROMPT =
 function inside(cwd: string, p: string) {
   const abs = isAbsolute(p) ? p : resolve(cwd, p);
   const rel = relative(cwd, abs);
-  return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel) && !rel.split(sep).includes('.git');
+  return rel !== '' && rel !== '..' && !rel.startsWith('..' + sep) && !isAbsolute(rel) && !rel.split(sep).includes('.git');
 }
 
 export interface RunOptions {
@@ -140,10 +141,71 @@ export async function runCodeJob(o: RunOptions): Promise<{ files: SyncFile[]; su
   return { files, summary };
 }
 
-/** Design-to-code jobs for the open project, kept until the designer keeps or discards them. */
+const EXCLUDED = new Set(['.git', 'node_modules', '.designer', 'dist', 'build', 'coverage', '.next', '.venv', 'vendor', 'target']);
+
+function proposalSource(path: string) {
+  return path.split(sep).every((part) => !EXCLUDED.has(part) && (!part.startsWith('.env') || part === '.env.example'));
+}
+
+async function sourceSnapshot(cwd: string, snapshot: string) {
+  const files = await git(cwd, ['ls-files', '-z', '--cached', '--others', '--exclude-standard']).catch(() => undefined);
+  if (files === undefined) {
+    await cp(cwd, snapshot, {
+      recursive: true,
+      filter: async (path) => proposalSource(relative(cwd, path)) && !(await lstat(path)).isSymbolicLink(),
+    });
+    return;
+  }
+  for (const file of new Set(files.split('\0').filter(Boolean))) {
+    if (!proposalSource(file)) continue;
+    const source = await proposalTarget(cwd, file).catch(() => undefined);
+    if (!source) continue;
+    const info = await lstat(source).catch(() => null);
+    if (!info?.isFile()) continue;
+    const target = resolve(snapshot, file);
+    await mkdir(dirname(target), { recursive: true });
+    await cp(source, target);
+  }
+}
+
+/** Resolve a proposal target without following symlinks in the live checkout. */
+async function proposalTarget(cwd: string, file: string) {
+  if (!inside(cwd, file) || !proposalSource(file)) throw new Error(`The proposal cannot modify ${file}.`);
+  const target = resolve(cwd, file);
+  const parts = relative(cwd, target).split(sep);
+  let parent = cwd;
+  for (const part of parts) {
+    parent = join(parent, part);
+    const info = await lstat(parent).catch((e: NodeJS.ErrnoException) => {
+      if (e.code === 'ENOENT') return null;
+      throw e;
+    });
+    if (info?.isSymbolicLink()) throw new Error(`The proposal cannot follow a symlink at ${relative(cwd, parent)}.`);
+  }
+  return target;
+}
+
+async function writeProposalFile(target: string, content: string, existing: boolean) {
+  const temp = `${target}.${randomUUID()}.tmp`;
+  try {
+    const mode = existing ? (await lstat(target)).mode : undefined;
+    await writeFile(temp, content, { mode, flag: 'wx' });
+    if (existing) await rename(temp, target);
+    else await link(temp, target);
+  } finally {
+    await rm(temp, { force: true });
+  }
+}
+
+async function checkoutRef(cwd: string) {
+  return git(cwd, ['symbolic-ref', '--quiet', 'HEAD']).catch(() => headOf(cwd));
+}
+
+/** Design-to-code proposals are scoped to a project and applied after review. */
 export class CodeSync {
   jobs = new Map<string, SyncJob>();
-  private busy = false;
+  private refs = new Map<string, string>();
+  private applying = new Set<string>();
 
   constructor(
     private readonly o: {
@@ -155,85 +217,99 @@ export class CodeSync {
     },
   ) {}
 
-  list() {
-    return [...this.jobs.values()].sort((a, b) => b.createdAt - a.createdAt);
+  list(project?: string) {
+    return [...this.jobs.values()].filter((job) => job.project === project).sort((a, b) => b.createdAt - a.createdAt);
   }
 
-  /** Starts a job and returns at once; progress and the proposal arrive through send(). */
   start(layers: LayerSync[]): SyncJob {
     const claudePath = this.o.claudePath();
-    if (!claudePath) throw new Error('Claude Code was not found on this computer.');
+    if (!claudePath) throw new Error('Claude Code was not found or is signed out.');
     const real = layers.filter((l) => l.changes.length);
     if (!real.length) throw new Error('There are no canvas changes to send to code.');
-    if (this.busy) throw new Error('Claude is already turning canvas changes into code. Wait for it to finish.');
     const cwd = this.o.cwd();
-    const job: SyncJob = { id: randomUUID(), layers: real, status: 'running', progress: [], files: [], summary: '', createdAt: Date.now() };
+    if (this.list(cwd).some((job) => job.status === 'running')) throw new Error('Claude is already preparing a code proposal for this project.');
+    const job: SyncJob = { id: randomUUID(), project: cwd, layers: real, status: 'running', progress: [], files: [], summary: '', createdAt: Date.now() };
     this.jobs.set(job.id, job);
-    this.busy = true;
     this.o.send(job);
-    const run = this.o.run ?? runCodeJob;
-    void run({
-      claudePath,
-      cwd,
-      prompt: buildSyncPrompt(real),
-      model: this.o.model?.(),
-      onProgress: (t) => {
-        job.progress = [...job.progress, t].slice(-20);
-        this.o.send(job);
-      },
-    }).then(
-      (r) => {
-        job.files = r.files;
-        job.summary = r.summary;
-        if (r.files.length) job.status = 'review';
-        else {
-          job.status = 'failed';
-          job.error = r.summary ? `Claude did not change any files: ${r.summary}` : 'Claude did not change any files.';
-        }
-      },
-      (e: Error) => {
-        job.status = 'failed';
-        job.error = e.message;
-      },
-    ).finally(() => {
-      this.busy = false;
-      this.o.send(job);
-    });
+    void this.prepare(cwd, claudePath, job);
     return job;
+  }
+
+  private async prepare(cwd: string, claudePath: string, job: SyncJob) {
+    let snapshot: string | undefined;
+    try {
+      this.refs.set(job.id, await checkoutRef(cwd));
+      snapshot = await mkdtemp(join(tmpdir(), 'designer-proposal-'));
+      await sourceSnapshot(cwd, snapshot);
+      const run = this.o.run ?? runCodeJob;
+      const result = await run({
+        claudePath, cwd: snapshot, prompt: buildSyncPrompt(job.layers), model: this.o.model?.(),
+        onProgress: (text) => {
+          job.progress = [...job.progress, text].slice(-20);
+          this.o.send(job);
+        },
+      });
+      if (!result.files.length) throw new Error(result.summary ? `Claude did not change any files: ${result.summary}` : 'Claude did not change any files.');
+      job.files = result.files;
+      job.summary = result.summary;
+      job.status = 'review';
+    } catch (e) {
+      job.status = 'failed';
+      job.error = (e as Error).message;
+    } finally {
+      if (snapshot) await rm(snapshot, { recursive: true, force: true }).catch(() => undefined);
+      this.o.send(job);
+    }
   }
 
   private get(id: string) {
     const job = this.jobs.get(id);
-    if (!job) throw new Error('That change is no longer here.');
+    if (!job || job.project !== this.o.cwd()) throw new Error('That proposal is not in this project.');
+    if (this.applying.has(job.project!)) throw new Error('A code proposal is already being applied.');
     if (job.status !== 'review') throw new Error(`That change was already ${job.status === 'kept' ? 'kept' : job.status === 'discarded' ? 'discarded' : 'handled'}.`);
     return job;
   }
 
-  /** The code stays as Claude left it. */
-  keep(id: string) {
+  async keep(id: string) {
     const job = this.get(id);
-    job.status = 'kept';
-    this.o.send(job);
-    return job;
+    const cwd = job.project!;
+    this.applying.add(cwd);
+    const applied: { file: SyncFile; target: string }[] = [];
+    const read = (path: string) => readFile(path, 'utf8').catch((e: NodeJS.ErrnoException) => {
+      if (e.code === 'ENOENT') return null;
+      throw e;
+    });
+    try {
+      if (await checkoutRef(cwd) !== this.refs.get(id)) throw new Error('The checkout changed branches. Open the original branch or create a fresh proposal.');
+      const targets = await Promise.all(job.files.map(async (file) => ({ file, target: await proposalTarget(cwd, file.path) })));
+      for (const { file, target } of targets) {
+        if (await read(target) !== file.before) throw new Error(`${file.path} changed after this proposal was prepared. Create a fresh proposal.`);
+      }
+      for (const item of targets) {
+        const { file, target } = item;
+        await mkdir(dirname(target), { recursive: true });
+        if (await read(target) !== file.before) throw new Error(`${file.path} changed while applying this proposal.`);
+        await writeProposalFile(target, file.after, file.before !== null);
+        applied.push(item);
+      }
+      job.status = 'kept';
+      this.o.send(job);
+      return job;
+    } catch (e) {
+      for (const { file, target } of applied.reverse()) {
+        if (await read(target) !== file.after) continue;
+        if (file.before === null) await unlink(target);
+        else await writeProposalFile(target, file.before, true);
+      }
+      throw e;
+    } finally {
+      this.applying.delete(cwd);
+    }
   }
 
-  /** Puts each file back as it was, unless it changed again since Claude's edit (then it is left alone). */
-  async discard(id: string) {
+  discard(id: string) {
     const job = this.get(id);
-    const cwd = this.o.cwd();
-    const skipped: string[] = [];
-    for (const f of job.files) {
-      const abs = resolve(cwd, f.path);
-      const now = await readFile(abs, 'utf8').catch(() => null);
-      if (now !== f.after) {
-        skipped.push(f.path);
-        continue;
-      }
-      if (f.before === null) await unlink(abs).catch(() => undefined);
-      else await writeFile(abs, f.before);
-    }
     job.status = 'discarded';
-    if (skipped.length) job.skipped = skipped;
     this.o.send(job);
     return job;
   }
@@ -270,7 +346,9 @@ export class HeadWatcher {
     this.stop();
     this.cwd = cwd;
     if (!cwd) return;
-    this.head = await headOf(cwd);
+    const head = await headOf(cwd);
+    if (this.cwd !== cwd) return;
+    this.head = head;
     this.timer = setInterval(() => void this.check('head'), this.intervalMs);
     this.timer.unref?.();
   }
@@ -286,6 +364,7 @@ export class HeadWatcher {
       const from = this.head;
       this.head = now;
       const change: CodeChange = { from, to: now, files: await filesBetween(cwd, from, now), reason };
+      if (this.cwd !== cwd) return null;
       this.onChange(change);
       return change;
     })().finally(() => (this.checking = undefined));
@@ -295,5 +374,6 @@ export class HeadWatcher {
   stop() {
     if (this.timer) clearInterval(this.timer);
     this.timer = undefined;
+    this.cwd = undefined;
   }
 }

@@ -96,6 +96,7 @@ export interface ProjectInfo {
   stories: StoryEntry[];
   /** Reusable components found in the source, with their props, linked to their stories. */
   components: ComponentEntry[];
+  componentNotes?: string[];
 }
 
 export type PackageManager = 'npm' | 'pnpm' | 'yarn' | 'bun';
@@ -114,7 +115,7 @@ export interface ComponentEntry {
   file: string;
   /** The export to import it by ("default" for a default export). */
   exportName: string;
-  framework: 'react' | 'vue' | 'svelte';
+  framework: 'react' | 'vue' | 'svelte' | 'custom';
   props: ComponentProp[];
   /** Storybook story ids that render it; empty when it has no story yet. */
   storyIds: string[];
@@ -191,12 +192,11 @@ export interface RunRecipe {
   savedAt: string;
 }
 
-/** Progress of the setup that runs when a project is added: Claude reads the repo and gets it running. */
+/** Progress of an explicit project preview setup. */
 export interface SetupState {
   project: string;
   status: 'running' | 'done' | 'failed';
-  /** Who is doing it: Designer replaying the saved recipe, or Claude working it out. */
-  by: 'saved' | 'claude';
+  by: 'saved' | 'local' | 'claude';
   tasks: SetupTask[];
   activity: SetupActivity[];
   /** Claude's latest words, shown under the title while it works. */
@@ -441,6 +441,7 @@ export interface SyncFile {
 
 /** A design-to-code request run by the local Claude Code, and the code change it proposes. */
 export interface SyncJob {
+  project?: string;
   id: string;
   layers: LayerSync[];
   status: 'running' | 'review' | 'kept' | 'discarded' | 'failed';
@@ -448,8 +449,6 @@ export interface SyncJob {
   files: SyncFile[];
   summary: string;
   error?: string;
-  /** Files Discard left alone because they changed again after Claude's edit. */
-  skipped?: string[];
   createdAt: number;
 }
 

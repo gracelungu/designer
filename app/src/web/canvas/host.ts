@@ -1,6 +1,6 @@
 // Creates the canvas editor once, with its toolbar, layers and properties panels, so React can
 // place those panels in the app's own sidebars without remounting them.
-import { bindShortcuts, cssFor, emptyDoc, Editor, exportSVG, LayersPanel, PropertiesPanel, Toolbar, type EditorNode } from '../../../../editor/src/index.js';
+import { bindShortcuts, cssFor, emptyDoc, Editor, exportSVG, LayersPanel, PropertiesPanel, Toolbar } from '../../../../editor/src/index.js';
 import type { CanvasComment, CanvasOp, PreviewFrame } from '../../shared/protocol';
 import { api } from '../api';
 import { buildNodes, canvasState, freeSpot, placeAt, selectionContext, storyIds, applySimple } from './convert';
@@ -12,6 +12,8 @@ export interface CanvasHost {
   propsEl: HTMLDivElement;
   /** Loads the canvas saved for the open project (or Designer's own folder). */
   load(): Promise<void>;
+  /** Finish saving the current canvas before switching projects. */
+  flush(): Promise<void>;
   apply(op: CanvasOp): Promise<unknown>;
   placeStory(storyId: string, opts?: { nextToSelection?: boolean; title?: string; file?: string; args?: Record<string, unknown> }): Promise<string>;
   showPage(url: string, name?: string): Promise<string>;
@@ -54,7 +56,16 @@ export function canvasHost(onAskAI: () => void): CanvasHost {
   // Comments are saved on their own, one file per thread, as soon as they change.
   let saveTimer: ReturnType<typeof setTimeout> | undefined;
   let loading = false;
+  let loadId = 0;
   let savedComments = '[]';
+  let saving = Promise.resolve<unknown>(undefined);
+  const saveCanvas = async () => {
+    clearTimeout(saveTimer);
+    saveTimer = undefined;
+    const data = structuredClone({ version: 1, doc: store.doc, assets: store.assets });
+    saving = saving.catch(() => undefined).then(() => api('/api/canvas', { data }));
+    await saving;
+  };
   store.on((ch) => {
     if (!ch.has('commit') || loading) return;
     const comments = JSON.stringify(store.doc.comments ?? []);
@@ -63,7 +74,7 @@ export function canvasHost(onAskAI: () => void): CanvasHost {
       void api('/api/comments', { comments: store.doc.comments ?? [] }).catch(() => undefined);
     }
     clearTimeout(saveTimer);
-    saveTimer = setTimeout(() => void api('/api/canvas', { data: { version: 1, doc: store.doc, assets: store.assets } }).catch(() => undefined), 600);
+    saveTimer = setTimeout(() => void saveCanvas().catch(() => undefined), 600);
   });
 
   const storySrc = async (ids: Iterable<string>) => {
@@ -86,11 +97,19 @@ export function canvasHost(onAskAI: () => void): CanvasHost {
     stage,
     layersEl,
     propsEl,
+    async flush() {
+      if (loading) throw new Error('Wait for the canvas to open.');
+      if (saveTimer) await saveCanvas();
+      else await saving;
+    },
     async load() {
       clearTimeout(saveTimer);
+      saveTimer = undefined;
       loading = true;
+      const id = ++loadId;
       try {
         const r = await api<{ data: { doc?: { comments?: unknown[] }; assets?: Record<string, string> } | null; comments?: CanvasComment[]; author?: string }>('/api/canvas').catch(() => ({ data: null, comments: [] as CanvasComment[], author: undefined }));
+        if (id !== loadId) return;
         const data = r.data;
         if (data && data.doc) store.load(data.doc, data.assets ?? {});
         else store.load(emptyDoc(), {});
@@ -108,7 +127,7 @@ export function canvasHost(onAskAI: () => void): CanvasHost {
         store.emit('doc');
         requestAnimationFrame(() => (store.doc.root.length ? editor.zoomToFit() : undefined));
       } finally {
-        setTimeout(() => (loading = false), 50);
+        if (id === loadId) loading = false;
       }
     },
     async apply(op) {
@@ -169,18 +188,17 @@ export function canvasHost(onAskAI: () => void): CanvasHost {
     },
     async showPage(url, name) {
       const { src } = await api<{ src: string }>(`/api/preview?url=${encodeURIComponent(url)}`);
-      const origin = new URL(url).origin;
-      // Reuse the frames already showing this app; their address changes when the server restarts.
-      const existing = store.allIds().map((id) => store.get(id)!).filter((n: EditorNode) => n.type === 'code' && n.code?.kind === 'page' && n.code.url && new URL(n.code.url).origin === origin);
-      if (existing.length) {
-        for (const n of existing) n.code!.src = src.replace(/^(http:\/\/[^/]+).*/, '$1') + new URL(n.code!.url!).pathname;
+      const address = new URL(url).href;
+      const existing = store.allIds().map((id) => store.get(id)!).find((n) => n.type === 'code' && n.code?.kind === 'page' && n.code.url && n.code.url === address);
+      if (existing?.code) {
+        existing.code.src = src;
         store.emit('doc');
-        return existing[0].id;
+        return existing.id;
       }
       const id = store.transact(() => {
         const spot = freeSpot(store, false);
         const n = store.create('code', { x: spot.x, y: spot.y, w: 1280, h: 800, name: name ?? `App · ${new URL(url).pathname}` });
-        n.code = { kind: 'page', src, url, title: n.name, hug: false, args: {} };
+        n.code = { kind: 'page', src, url: address, title: n.name, hug: false, args: {} };
         return n.id;
       });
       focusOn([id]);
@@ -223,7 +241,7 @@ export function canvasHost(onAskAI: () => void): CanvasHost {
     },
     state: () => canvasState(store),
     async measureStory(storyId, timeoutMs = 20000) {
-      const { src } = await api<{ src: string }>(`/api/story-src?id=${encodeURIComponent(storyId)}`);
+      const { src } = await api<{ src: string }>(`/api/story-src?id=${encodeURIComponent(storyId)}&start=false`);
       return new Promise<Record<string, string>>((resolve, reject) => {
         const f = document.createElement('iframe');
         f.setAttribute('aria-hidden', 'true');

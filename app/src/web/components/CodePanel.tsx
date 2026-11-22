@@ -1,6 +1,6 @@
 import { useEffect, useReducer, useState } from 'react';
 import { cssFor, type CodeInfo, type Editor, type EditorNode } from '../../../../editor/src/index.js';
-import type { StoryEntry } from '../../shared/protocol';
+import type { ComponentEntry, StoryEntry } from '../../shared/protocol';
 import { parseColor } from '../canvas/convert';
 
 /** Re-renders when the canvas changes, so panels stay in step with the selection and live renders. */
@@ -15,11 +15,15 @@ type Arg = NonNullable<CodeInfo['argTypes']>[string];
 export function CodePanel({
   editor,
   stories,
+  components,
+  onReview,
   onAsk,
   onShowStory,
 }: {
   editor: Editor;
   stories: StoryEntry[];
+  components: ComponentEntry[];
+  onReview: () => void;
   onAsk: (prompt: string) => void;
   onShowStory: (storyId: string, nextTo: boolean) => void;
 }) {
@@ -30,7 +34,7 @@ export function CodePanel({
   const n = sel[0];
   if (n.type === 'code' && n.code?.kind === 'page') return <PageCode n={n} editor={editor} />;
   if (n.type === 'code') return <ComponentCode n={n} editor={editor} onAsk={onAsk} />;
-  return <DesignCode n={n} editor={editor} stories={stories} onAsk={onAsk} onShowStory={onShowStory} />;
+  return <DesignCode key={n.id} n={n} editor={editor} stories={stories} components={components} onReview={onReview} onAsk={onAsk} onShowStory={onShowStory} />;
 }
 
 function ComponentCode({ n, editor, onAsk }: { n: EditorNode; editor: Editor; onAsk: (p: string) => void }) {
@@ -181,69 +185,74 @@ function PageCode({ n, editor }: { n: EditorNode; editor: Editor }) {
   );
 }
 
-function DesignCode({ n, editor, stories, onAsk, onShowStory }: { n: EditorNode; editor: Editor; stories: StoryEntry[]; onAsk: (p: string) => void; onShowStory: (id: string, nextTo: boolean) => void }) {
+function DesignCode({ n, editor, stories, components, onReview, onAsk, onShowStory }: {
+  n: EditorNode;
+  editor: Editor;
+  stories: StoryEntry[];
+  components: ComponentEntry[];
+  onReview: () => void;
+  onAsk: (p: string) => void;
+  onShowStory: (id: string, nextTo: boolean) => void;
+}) {
   const [linking, setLinking] = useState(false);
+  const [query, setQuery] = useState('');
   const store = editor.store;
   const link = n.codeLink;
   const entry = link?.storyId ? stories.find((e) => e.stories.some((s) => s.id === link.storyId)) : undefined;
+  const component = components.find((c) => c.file === link?.file && (c.exportName || undefined) === link?.exportName);
+  const matchedIds = new Set(components.flatMap((c) => c.storyIds));
+  const options = [
+    ...components.flatMap<{ name: string; file: string; exportName?: string; storyId?: string }>((c) => {
+      const source = { name: c.name, file: c.file, exportName: c.exportName || undefined };
+      const variants = stories.flatMap((e) => e.stories.filter((s) => c.storyIds.includes(s.id)));
+      return variants.length ? variants.map((s) => ({ ...source, name: variants.length > 1 ? `${c.name} / ${s.name}` : c.name, storyId: s.id }))
+        : [{ ...source, storyId: undefined }];
+    }),
+    ...stories.flatMap((e) => e.stories.filter((s) => !matchedIds.has(s.id)).map((s) => ({ name: `${e.title.split('/').pop()} / ${s.name}`, file: e.file, exportName: s.exportName, storyId: s.id }))),
+  ].filter((c) => `${c.name} ${c.file}`.toLowerCase().includes(query.trim().toLowerCase()));
+  const relink = (next?: EditorNode['codeLink']) => {
+    store.transact(() => {
+      if (next) n.codeLink = next;
+      else delete n.codeLink;
+      delete n.sync;
+    });
+    setLinking(false);
+  };
   const css = cssFor(store, n);
   return (
     <div className="scroll code-panel">
-      {link?.storyId ? (
-        <>
-          <div className="cp-head">
-            <div className="faint">In code as</div>
-            <div className="cp-title">
-              <span className="code-glyph">{'</>'}</span>
-              {entry?.title.split('/').pop() ?? link.storyId}
-            </div>
-            <div className="faint mono">{entry?.file ?? link.file}</div>
-          </div>
-          <div className="cp-actions">
-            <button className="btn primary" onClick={() => onShowStory(link.storyId!, true)}>Show code version beside it</button>
-            <button className="btn" onClick={() => onAsk(`Make the coded component (story ${link.storyId}) match the "${n.name}" design on the canvas exactly. Read the design with get_canvas, change the component using our tokens, then show_component next to the design and compare.`)}>
-              Match code to design
+      <div className="cp-head">
+        <div className="cp-title">{link ? component?.name ?? entry?.title.split('/').pop() ?? n.name : 'Link a code component'}</div>
+        {link ? (
+          <>
+            <div className="faint mono">{link.file ?? entry?.file}{link.exportName ? ` · ${link.exportName}` : ''}</div>
+            <div className="faint">{link.storyId ? 'Design layer with a live comparison' : 'Design layer linked to source'}</div>
+          </>
+        ) : <div className="faint">Connect this layer to its source, or build it as a new component.</div>}
+      </div>
+      <div className="cp-actions">
+        {link ? (
+          <>
+            <button className="btn primary" onClick={onReview}>Review design changes</button>
+            {link.storyId && <button className="btn" onClick={() => onShowStory(link.storyId!, true)}>Show live comparison</button>}
+            <button className="btn ghost" onClick={() => relink()}>Unlink</button>
+          </>
+        ) : (
+          <>
+            <button className="btn primary" onClick={() => setLinking(!linking)} disabled={!components.length && !stories.length}>Link to a component</button>
+            <button className="btn" onClick={() => onAsk(`Build the selected "${n.name}" design as a component in this project. Read the canvas, follow its component conventions and tokens, then link the layer to the source file and export. If the project already uses Storybook, add a story and show it beside the design.`)}>Build in code with Claude</button>
+          </>
+        )}
+      </div>
+      {linking && (
+        <div className="link-list">
+          <input className="input" placeholder="Find a source component" aria-label="Find a source component" value={query} onChange={(e) => setQuery(e.target.value)} />
+          {options.map(({ name, ...target }) => (
+            <button key={`${target.file}#${target.exportName}#${target.storyId}`} onClick={() => relink(target)}>
+              <b>{name}</b> <span className="faint">{target.file}</span>
             </button>
-            <button className="btn ghost" onClick={() => store.transact(() => void delete n.codeLink)}>Unlink</button>
-          </div>
-        </>
-      ) : (
-        <>
-          <div className="cp-head">
-            <div className="cp-title">Not in code yet</div>
-            <div className="faint">Build this as a component in your repo, or link it to one that already exists.</div>
-          </div>
-          <div className="cp-actions">
-            <button
-              className="btn primary"
-              onClick={() =>
-                onAsk(
-                  `Build the selected "${n.name}" design as a component in this repo. Read it with get_canvas, follow the repo's component conventions and tokens, add a Storybook story for each variant, then show_component next to the design so we can compare, and link them.`,
-                )
-              }
-            >
-              Build in code with Claude
-            </button>
-            <button className="btn" onClick={() => setLinking(!linking)} disabled={!stories.length}>Link to a component</button>
-          </div>
-          {linking && (
-            <div className="link-list">
-              {stories.flatMap((e) =>
-                e.stories.map((s) => (
-                  <button
-                    key={s.id}
-                    onClick={() => {
-                      store.transact(() => void (n.codeLink = { storyId: s.id, file: e.file, exportName: s.exportName }));
-                      setLinking(false);
-                    }}
-                  >
-                    <b>{e.title.split('/').pop()}</b> <span className="faint">{s.name}</span>
-                  </button>
-                )),
-              )}
-            </div>
-          )}
-        </>
+          ))}
+        </div>
       )}
       <div className="section-title">CSS</div>
       <pre className="snippet">{css}</pre>
