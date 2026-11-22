@@ -153,7 +153,7 @@
 .dz-paint { display: flex; align-items: center; gap: 2px; }
 .dz-paint.off .dz-paint-main { opacity: .45; }
 .dz-paint-main { flex: 1; min-width: 0; display: flex; }
-.dz-thumb { width: 24px; height: 24px; flex: none; border-radius: 4px; background: var(--bg-3) center / cover no-repeat; }
+.dz-thumb { width: 24px; height: 24px; flex: none; border-radius: 4px; background: var(--bg-3); object-fit: cover; }
 .dz-effect { display: flex; flex-direction: column; gap: 6px; }
 .dz-effect.off .dz-fx-params { opacity: .45; }
 .dz-fx-params { display: flex; flex-direction: column; gap: 6px; padding-left: 4px; }
@@ -218,3 +218,26 @@
 .dz-live-pill { position: absolute; display: flex; align-items: center; gap: 8px; height: 26px; padding: 0 4px 0 10px; border-radius: 13px; background: var(--sel); color: #fff; font-size: 11px; font-weight: 500; white-space: nowrap; pointer-events: auto; }
 .dz-live-pill button { height: 20px; padding: 0 8px; border: 0; border-radius: 10px; background: rgba(255,255,255,.22); color: #fff; font-weight: 600; }
 .dz-on { font-weight: 400; color: var(--muted); }
+
+/* Prototype inspector and presentation */
+.dz-prototype-label { display: grid; gap: 5px; }
+.dz-prototype-dialog { width: min(1120px, calc(100vw - 32px)); height: min(860px, calc(100dvh - 32px)); padding: 0; border: 1px solid var(--line); border-radius: 12px; color: var(--text); background: var(--bg); box-shadow: var(--shadow); }
+.dz-prototype-dialog[open] { display: flex; flex-direction: column; }
+.dz-prototype-dialog::backdrop { background: rgb(0 0 0 / 60%); }
+.dz-prototype-dialog header { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 12px; border-bottom: 1px solid var(--line); }
+.dz-prototype-dialog header strong { min-width: 0; overflow-wrap: anywhere; }
+.dz-prototype-stage { flex: 1; min-height: 0; display: grid; place-items: center; background: var(--canvas); }
+.dz-prototype-screen { position: relative; }
+.dz-prototype-screen img { display: block; width: 100%; height: 100%; }
+.dz-prototype-hotspot { position: absolute; padding: 0; border: 0; background: transparent; cursor: pointer; }
+.dz-prototype-hotspot:hover, .dz-prototype-hotspot:focus-visible { outline: 2px solid var(--sel); outline-offset: -2px; }
+
+.dz-paint-editor, .dz-gradient { display: grid; gap: 6px; min-width: 0; width: 100%; }
+.dz-gradient-stop { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr) auto; gap: 4px; align-items: center; }
+
+.dz-quick-actions { width: min(460px, calc(100vw - 32px)); padding: 8px; border: 1px solid var(--line); border-radius: 12px; color: var(--text); background: var(--bg); box-shadow: var(--shadow); }
+.dz-quick-actions::backdrop { background: rgb(0 0 0 / 35%); }
+.dz-quick-actions input { box-sizing: border-box; width: 100%; padding: 10px 12px; font: inherit; color: inherit; background: var(--bg-2); border: 1px solid var(--line); border-radius: 6px; }
+.dz-action-results { max-height: min(42vh, 336px); overflow: auto; margin-top: 6px; }
+.dz-action-option { display: flex; justify-content: space-between; gap: 12px; padding: 8px; border-radius: 4px; cursor: pointer; }
+.dz-action-option[aria-selected="true"], .dz-action-option:hover { background: var(--sel-soft); }

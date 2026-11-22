@@ -52,7 +52,7 @@ const press = async (k) => { await page.keyboard.press(k); await page.waitForTim
 (async () => {
   await new Promise((r) => server.listen(0, r));
   const port = server.address().port;
-  const browser = await chromium.launch();
+  const browser = await chromium.launch(process.env.PW_CHROMIUM ? { executablePath: process.env.PW_CHROMIUM } : {});
   page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   page.on('pageerror', (e) => errors.push(e.message));
   page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });

@@ -1,3 +1,4 @@
+import { gradientStops } from '../core/gradient.js';
 // CSS for a layer, for the Inspect tab (developer hand-off).
 
 import { cornerRadii } from '../core/paths.js';
@@ -10,7 +11,7 @@ export function cssFor(store, n) {
   const add = (k, v) => out.push(`${k}: ${v};`);
   const parent = store.parent(n.id);
   if (parent && parent.layout && !n.absolute) {
-    if (n.sizing?.h === 'fill') add(parent.layout.mode === 'horizontal' ? 'flex' : 'align-self', parent.layout.mode === 'horizontal' ? '1 0 0' : 'stretch');
+    if (n.sizing?.h === 'fill') add(parent.layout.mode === 'horizontal' ? 'flex' : 'align-self', parent.layout.mode === 'horizontal' ? (parent.layout.wrap ? '0 0 100%' : '1 0 0') : 'stretch');
   } else if (parent) {
     add('position', 'absolute');
     add('left', px(n.x - parent.x));
@@ -31,7 +32,12 @@ export function cssFor(store, n) {
     const map = { start: 'flex-start', center: 'center', end: 'flex-end', 'space-between': 'space-between' };
     add('justify-content', map[L.primary]);
     add('align-items', map[L.counter]);
-    if (L.primary !== 'space-between') add('gap', px(L.gap));
+    if (L.mode === 'horizontal' && L.wrap && n.sizing?.h !== 'hug') {
+      add('flex-wrap', 'wrap');
+      add('align-content', 'flex-start');
+      add('row-gap', px(L.rowGap ?? L.gap));
+      if (L.primary !== 'space-between') add('column-gap', px(L.gap));
+    } else if (L.primary !== 'space-between') add('gap', px(L.gap));
     const p = L.padding;
     add('padding', `${px(p.t)} ${px(p.r)} ${px(p.b)} ${px(p.l)}`);
   }
@@ -52,7 +58,14 @@ export function cssFor(store, n) {
     const tcase = { upper: 'uppercase', lower: 'lowercase', title: 'capitalize' }[t.textCase];
     if (tcase) add('text-transform', tcase);
   } else if (fills.length) {
-    const bg = fills.map((f) => (f.type === 'image' ? `url(image.png) center / ${f.fit === 'fit' ? 'contain' : f.fit === 'stretch' ? '100% 100%' : 'cover'} no-repeat` : `linear-gradient(${hexA(f.color, f.opacity)}, ${hexA(f.color, f.opacity)})`));
+    const bg = fills.map((f) => {
+      if (f.type === 'image') return `url(image.png) center / ${f.fit === 'fit' ? 'contain' : f.fit === 'stretch' ? '100% 100%' : 'cover'} no-repeat`;
+      if (f.type === 'linear' || f.type === 'radial') {
+        const stops = gradientStops(f).map((s) => `${hexA(s.color, s.opacity * (f.opacity ?? 1))} ${Math.round(s.position * 10000) / 100}%`);
+        return f.type === 'linear' ? `linear-gradient(${f.angle}deg, ${stops.join(', ')})` : `radial-gradient(ellipse farthest-corner, ${stops.join(', ')})`;
+      }
+      return `linear-gradient(${hexA(f.color, f.opacity)}, ${hexA(f.color, f.opacity)})`;
+    });
     if (fills.length === 1 && fills[0].type === 'solid') add('background', hexA(fills[0].color, fills[0].opacity));
     else add('background', bg.join(', '));
   }

@@ -6,7 +6,7 @@ import { isFrameLike, isLine } from '../core/model.js';
 import { hitTest, nodesInRect, frameAt } from '../core/hittest.js';
 import { snapTargets, snapBox, snapPoint } from '../core/snap.js';
 import { setBox, resizeSingle, rotateNodes } from '../core/transform.js';
-import { insertionIndex } from '../core/layout.js';
+import { insertionIndex, wrappedInsertion } from '../core/layout.js';
 import { handleAt, frameLabels, resizeCursor, rotateCursor } from '../render/overlay.js';
 
 const DRAG_THRESHOLD = 3;
@@ -275,42 +275,45 @@ export class SelectTool {
     }
 
     // where would this land?
-    let drop = frameAt(store, p, d.exclude);
+    const drop = frameAt(store, p, d.exclude);
     let insert = null;
     const first = d.ids[0];
     const container = effectiveContainer(store, first);
     if (drop && store.get(drop).layout) {
       const f = store.get(drop);
       const fp = store.worldToParent(drop, p);
-      const idx = insertionIndex(store, f, fp, d.ids);
-      insert = this.insertMarker(f, idx, d.ids);
-      d.insertIndex = idx;
+      store.finalize();
+      const wrapped = wrappedInsertion(store, f, fp, d.ids);
+      d.insertIndex = wrapped?.index ?? insertionIndex(store, f, fp, d.ids);
+      insert = this.insertMarker(f, d.insertIndex, d.ids, wrapped);
     }
     d.drop = drop;
-    store.finalize();
+    if (!insert) store.finalize();
     store.overlay.guides = guides;
     store.overlay.dropTarget = drop !== container ? drop : null;
     store.overlay.insert = insert;
     store.emit('doc');
   }
 
-  insertMarker(f, idx, exclude) {
+  insertMarker(f, idx, exclude, wrapped) {
     const store = this.store;
-    const kids = f.children.filter((c) => !exclude.includes(c)).map((c) => store.get(c)).filter((c) => c.visible && !c.absolute);
+    const full = f.children.filter((id) => !exclude.includes(id));
+    const kids = full.map((id) => store.get(id)).filter((c) => c.visible && !c.absolute);
+    const before = store.get(full[idx]);
     const H = f.layout.mode === 'horizontal';
     const pad = f.layout.padding;
     let pos;
     if (!kids.length) pos = H ? f.x + pad.l : f.y + pad.t;
-    else if (idx < kids.length) {
-      const b = store.parentSpaceBox(kids[idx]);
+    else if (before) {
+      const b = store.parentSpaceBox(before);
       pos = (H ? b.x : b.y) - (idx > 0 ? f.layout.gap / 2 : 0);
     } else {
       const b = store.parentSpaceBox(kids[kids.length - 1]);
       pos = (H ? b.x + b.w : b.y + b.h) + f.layout.gap / 2;
     }
     const m = store.matrix(f.id);
-    const a = H ? { x: pos, y: f.y + pad.t } : { x: f.x + pad.l, y: pos };
-    const b = H ? { x: pos, y: f.y + f.h - pad.b } : { x: f.x + f.w - pad.r, y: pos };
+    const a = H ? { x: wrapped?.x ?? pos, y: wrapped?.top ?? f.y + pad.t } : { x: f.x + pad.l, y: pos };
+    const b = H ? { x: wrapped?.x ?? pos, y: wrapped?.bottom ?? f.y + f.h - pad.b } : { x: f.x + f.w - pad.r, y: pos };
     const wa = G.apply(m, a), wb = G.apply(m, b);
     return { x1: wa.x, y1: wa.y, x2: wb.x, y2: wb.y };
   }

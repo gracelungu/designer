@@ -39,6 +39,18 @@ describe('server security', () => {
     });
     expect(status).toBe(403);
   });
+  it('rejects invalid JSON and keeps serving requests', async () => {
+    for (const body of ['{', 'null', '[]']) {
+      const res = await fetch(`${srv.url}/api/canvas`, {
+        method: 'POST',
+        headers: { 'x-designer-token': srv.token, 'content-type': 'application/json' },
+        body,
+      });
+      expect(res.status).toBe(400);
+    }
+    expect((await call('/api/status')).status).toBe(200);
+  });
+
   it('404s unknown routes', async () => {
     expect((await call('/api/nope')).status).toBe(404);
   });
