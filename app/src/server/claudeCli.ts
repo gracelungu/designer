@@ -40,7 +40,7 @@ export function buildArgs(o: Pick<CliOptions, 'model' | 'effort' | 'permissionMo
     '--permission-prompt-tool', 'stdio',
     '--setting-sources', o.settingSources ?? 'user,project,local',
   ];
-  if (o.tools) args.push('--tools', o.tools.join(','), '--strict-mcp-config');
+  if (o.tools) args.push('--tools', o.tools.join(','), '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}');
   if (o.model) args.push('--model', o.model);
   if (o.effort) args.push('--effort', o.effort);
   if (o.permissionMode && o.permissionMode !== 'default') args.push('--permission-mode', o.permissionMode);
@@ -70,6 +70,8 @@ export class ClaudeCli {
       this.stderr = (this.stderr + d.toString()).slice(-8000);
     });
     this.proc.on('error', (e) => this.finish(null, e.message));
+    // A CLI that exits during initialization can close stdin before Node writes the first request.
+    this.proc.stdin.on('error', () => undefined);
     this.proc.on('exit', (code) => this.finish(code, this.stderr));
     createInterface({ input: this.proc.stdout }).on('line', (line) => this.onLine(line));
 

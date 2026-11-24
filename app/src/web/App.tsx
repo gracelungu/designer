@@ -158,6 +158,10 @@ function Workspace({ status, start, onRecheck }: { status: Status; start?: Start
         void api<VisualReview[]>('/api/visual-reviews').then(setReviews, () => setReviews([]));
         return;
       }
+      if (m.type === 'component-scan') {
+        setProject((current) => current?.path === m.path ? { ...current, catalog: m.catalog } : current);
+        return;
+      }
       if (m.type === 'component-catalog') {
         setProject((current) => current?.path === m.project.path ? m.project : current);
         if (m.project.catalog?.state === 'ready') host.reconnectComponents();
@@ -541,10 +545,10 @@ function Workspace({ status, start, onRecheck }: { status: Status; start?: Start
               }}
               onDesign={placeDesign}
               onScan={async () => {
-                const next = await api<ProjectInfo>('/api/components/scan', { project: project?.path });
-                setProject((current) => current?.path === next.path ? next : current);
+                await api<ProjectInfo>('/api/components/scan', { project: project?.path });
               }}
               onAddProject={() => setModal('project')}
+              onAgentSetup={() => { setChatView('chat'); setLeft('chat'); }}
             />
           </div>
           <div className={`pane ${left === 'versions' ? '' : 'hidden'}`}>

@@ -188,10 +188,10 @@ export async function startServer(opts: ServerOptions = {}) {
   function scanCatalog(info: ProjectInfo) {
     const generation = projectGeneration;
     activeCatalog = info;
-    void catalog.scan(info, claude.found && claude.loggedIn !== false ? claude.path : undefined, session?.model, () => {
-      if (projectPath === info.path && generation === projectGeneration) {
-        broadcast({ type: 'component-catalog', project: catalog.merge(activeCatalog ?? info) });
-      }
+    void catalog.scan(info, claude.found && claude.loggedIn !== false ? claude.path : undefined, session?.model, (status) => {
+      if (projectPath !== info.path || generation !== projectGeneration) return;
+      if (status.state !== 'scanning') broadcast({ type: 'component-catalog', project: catalog.merge(activeCatalog ?? info) });
+      else broadcast({ type: 'component-scan', path: info.path, catalog: status });
     });
   }
 
@@ -783,6 +783,7 @@ export async function startServer(opts: ServerOptions = {}) {
   wss.on('connection', (ws: WebSocket) => {
     sockets.add(ws);
     ws.on('close', () => sockets.delete(ws));
+    if (activeCatalog) ws.send(JSON.stringify({ type: 'component-catalog', project: catalog.merge(activeCatalog) } satisfies ServerMessage));
     if (setup.state) ws.send(JSON.stringify({ type: 'setup', setup: setup.state } satisfies ServerMessage));
     if (session) ws.send(JSON.stringify({ type: 'session', sessionId: session.sessionId, model: session.model, effort: session.effort, mode: session.mode, running: session.running, busy: session.busy } satisfies ServerMessage));
     // Handle one message at a time, so "start" finishes before the "prompt" sent right after it.

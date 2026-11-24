@@ -342,11 +342,13 @@ describe('page health', () => {
 });
 
 describe('isolated source previews', () => {
-  it('mounts a real React component and an agent-discovered custom component from a folder with no scripts', async () => {
+  it('runs the discovery skill when a folder is selected and mounts the discovered components', async () => {
     const dir = realpathSync(mkdtempSync(join(tmpdir(), 'designer-source-preview-')));
     const project = join(dir, 'project');
     const custom = join(project, 'widgets', 'metrics.el');
     const oldCatalog = process.env.FAKE_CLAUDE_CATALOG;
+    const gate = join(dir, 'finish-catalog');
+    process.env.FAKE_CLAUDE_CATALOG_GATE = gate;
     process.env.FAKE_CLAUDE_CATALOG = JSON.stringify({ components: [{
       name: 'Metrics', file: 'widgets/metrics.el', exportName: '', framework: 'custom',
       group: 'Instruments',
@@ -363,7 +365,7 @@ describe('isolated source previews', () => {
     writeFileSync(join(project, 'src', 'components', 'Forms', 'SubmitButton.tsx'),
       "import { useState } from 'react'; import { prefix } from '@ui/label'; export function SubmitButton({ label }: { label: string }) { const [count, setCount] = useState(0); return <button onClick={() => setCount(count + 1)}>{prefix}: {label} {count}</button>; }");
     writeFileSync(custom, 'Content from a custom format');
-    const server = await startServer({ workspace: join(dir, 'Designer'), staticDir: STATIC, initialProject: project });
+    const server = await startServer({ workspace: join(dir, 'Designer'), staticDir: STATIC });
     let p: Page | undefined;
     try {
       p = await openPage(server.url);
@@ -372,6 +374,11 @@ describe('isolated source previews', () => {
       await p.getByText('Enter a folder path', { exact: true }).click();
       await p.getByRole('textbox', { name: 'Project folder path' }).fill(project);
       await p.getByRole('button', { name: 'Open path' }).click();
+      await p.getByText('Reading package.json', { exact: true }).waitFor();
+      await p.locator('.scan-steps [aria-current="step"]').filter({ hasText: 'Prepare component previews' }).waitFor({ timeout: 5000 });
+      writeFileSync(gate, '');
+      await p.getByRole('button', { name: /2 components.*Scan complete/ }).click();
+      await p.getByText('Check the catalog', { exact: true }).waitFor();
       await p.getByRole('heading', { name: 'Forms' }).waitFor();
       await p.getByRole('button', { name: 'SubmitButton', exact: true }).click();
       const iframe = p.locator('.dz-live-node iframe').first();
@@ -391,7 +398,17 @@ describe('isolated source previews', () => {
       await p.reload();
       await p.frameLocator('.dz-live-node iframe').nth(1).getByText('Content from a custom format').waitFor();
       expect((await (await fetch(`${server.url}/api/run`, { headers: { 'x-designer-token': server.token } })).json())).toEqual({ app: null, storybook: null });
+      process.env.FAKE_CLAUDE_CATALOG_ERROR = 'The selected model is unavailable for project scanning.';
+      await p.getByRole('button', { name: 'Rescan', exact: true }).click();
+      await p.getByText('Project scan stopped', { exact: true }).waitFor();
+      await p.locator('[aria-current="step"]').getByText('The selected model is unavailable for project scanning.').waitFor();
+      await p.getByRole('button', { name: 'SubmitButton', exact: true }).waitFor();
+      delete process.env.FAKE_CLAUDE_CATALOG_ERROR;
+      await p.getByRole('button', { name: 'Rescan', exact: true }).click();
+      await p.getByRole('button', { name: /2 components.*Scan complete/ }).waitFor();
     } finally {
+      delete process.env.FAKE_CLAUDE_CATALOG_ERROR;
+      delete process.env.FAKE_CLAUDE_CATALOG_GATE;
       if (oldCatalog === undefined) delete process.env.FAKE_CLAUDE_CATALOG;
       else process.env.FAKE_CLAUDE_CATALOG = oldCatalog;
       await p?.context().close();

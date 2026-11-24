@@ -48,12 +48,27 @@ createInterface({ input: process.stdin }).on('line', async (line) => {
     return;
   }
   if (m.type === 'user') {
+    const full = typeof m.message.content === 'string' ? m.message.content : '';
     if (args.includes('--tools')) {
-      const result = process.env.FAKE_CLAUDE_CATALOG ?? '{"components":[]}';
-      out({ type: 'result', subtype: 'success', is_error: false, result });
+      const skill = args[args.indexOf('--append-system-prompt') + 1] ?? '';
+      if (!skill.includes('name: project-component-discovery')) {
+        out({ type: 'result', subtype: 'error_during_execution', is_error: true, errors: ['Project discovery skill is missing.'] });
+        return;
+      }
+      if (full.startsWith('Start the inspection step')) {
+        const name = existsSync('package.json') ? 'Read' : 'Glob';
+        out({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'inspect-project', name, input: name === 'Read' ? { file_path: join(process.cwd(), 'package.json') } : { path: process.cwd(), pattern: '**/*' } }] } });
+        if (process.env.FAKE_CLAUDE_CATALOG) await new Promise((done) => setTimeout(done, 400));
+        out({ type: 'result', subtype: 'success', is_error: false, result: 'Project inspected.' });
+      } else {
+        const gate = process.env.FAKE_CLAUDE_CATALOG_GATE;
+        for (let i = 0; gate && !existsSync(gate) && i < 200; i++) await new Promise((done) => setTimeout(done, 50));
+        const error = process.env.FAKE_CLAUDE_CATALOG_ERROR;
+        if (error) out({ type: 'result', subtype: 'error_during_execution', is_error: true, errors: [error] });
+        else out({ type: 'result', subtype: 'success', is_error: false, result: process.env.FAKE_CLAUDE_CATALOG ?? '{"components":[]}' });
+      }
       return;
     }
-    const full = typeof m.message.content === 'string' ? m.message.content : '';
     // Designer's own notes lead the message ("[Designer] ..."); the fake acts on what the user typed.
     const text = full.replace(/^(\[Designer\][^\n]*\n)+\n?/, '');
     out({ type: 'system', subtype: 'init', session_id: 'sess-1', model, permissionMode: 'default' });

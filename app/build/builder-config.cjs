@@ -12,7 +12,7 @@ function buildConfig(env = process.env) {
     appId: 'dev.designer.app',
     productName: 'Designer',
     directories: { output: 'release', buildResources: 'build' },
-    files: ['electron/**', 'dist/**', 'package.json'],
+    files: ['electron/**', 'dist/**', 'skills/**', 'package.json'],
     // The demo project ships next to the app and is copied out on first use.
     extraResources: [{ from: 'demo', to: 'demo', filter: ['**/*', '!node_modules/**', '!dist/**', '!storybook-static/**'] }],
     asar: true,

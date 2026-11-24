@@ -565,3 +565,14 @@ textarea.memory { width: 100%; min-height: 160px; border: 1px solid var(--line-2
 .catalog-details .btn { justify-self: start; }
 .picker-path { margin-top: 12px; }
 .picker-path .component-controls { padding-left: 0; padding-right: 0; }
+
+
+.project-scan { margin: 8px 12px; padding: 9px 10px; background: var(--bg-2); border-radius: 6px; font-size: 12px; }
+.project-scan p { margin: 0 0 8px; }
+.scan-summary { border: 0; background: none; padding: 0; text-align: left; width: 100%; }
+.scan-summary span { color: var(--accent); margin-right: 4px; }
+.scan-steps { list-style: none; padding: 0; margin: 6px 0 0; display: grid; gap: 5px; }
+.scan-steps li { display: grid; grid-template-columns: 14px minmax(0, 1fr); gap: 5px; }
+.scan-step-mark { text-align: center; }
+.scan-steps li[aria-current] .scan-step-mark { color: var(--accent); }
+.scan-activity { color: var(--faint); margin-top: 2px; overflow-wrap: anywhere; }

@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { join, relative, resolve, isAbsolute, sep } from 'node:path';
-import { componentKey, type ComponentCatalogStatus, type ComponentEntry, type ProjectInfo } from '../shared/protocol.js';
+import { componentKey, type ComponentCatalogStatus, type ComponentEntry, type ComponentScanStep, type ProjectInfo } from '../shared/protocol.js';
 import { ClaudeCli } from './claudeCli.js';
 import { componentPath } from './project.js';
 
@@ -74,65 +74,113 @@ export async function parseCatalog(project: string, value: unknown): Promise<Map
 
 const READ_TOOLS = ['Glob', 'Grep', 'Read'];
 
-async function analyze(project: ProjectInfo, claudePath: string, model: string | undefined, signal: AbortSignal) {
+const CATALOG_SKILL = new URL('../../skills/project-component-discovery/SKILL.md', import.meta.url);
+
+type ScanProgress = (step: ComponentScanStep, activity?: string) => void;
+
+function outputText(value: unknown) {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function toolActivity(root: string, block: Record<string, unknown>) {
+  const name = String(block.name);
+  if (!READ_TOOLS.includes(name)) return undefined;
+  const input = asObject(block.input);
+  const target = resolve(root, String(input.file_path ?? input.path ?? '.'));
+  if (!inside(root, target)) return undefined;
+  const path = relative(root, target).split(sep).join('/');
+  if (name === 'Read') return `Reading ${path || 'project files'}`;
+  return `${name === 'Glob' ? 'Finding files' : 'Searching source'} in ${path || 'the project'}`;
+}
+
+async function analyze(project: ProjectInfo, claudePath: string, model: string | undefined, signal: AbortSignal, progress: ScanProgress) {
+  const skill = await readFile(CATALOG_SKILL, 'utf8');
+  signal.throwIfAborted();
   const root = project.path;
-  const prompt = [
-    'Inventory the reusable visual components in this repository for Designer’s canvas.',
-    'Inspect the entire project tree and each source package, including monorepo packages and non-JavaScript templates. Inspect component exports, entry points, global styles, providers and representative usages. Skip dependencies, generated trees, routes, pages, example stories, tests and secrets.',
-    'Return one JSON object with a components array. Each entry has name, file (relative to project), exportName (default or the exact named export; empty for a template), framework (react, vue, svelte or custom), optional group (slash-separated existing source grouping), props (array of {name,optional,type}), and optional previewProps (JSON values for required inputs).',
-    'Use the list below as the existing inventory. Return additions and entries that need corrections, preview inputs, global styles or special setup. Keep the same file and export for existing entries. An empty array is valid when no additions or overrides are needed.',
-    'When needed add styles (project-relative global stylesheet paths), aliases (an object mapping existing bare import aliases to project-relative paths), and renderer (plain JavaScript module source that exports mount(root, props), using no JSX or TypeScript syntax). The module resolves imports from the component source folder, can import the real source and use project browser dependencies, and can supply providers, slots or mock data. It can return a cleanup function for rerenders. Avoid unrelated app bootstrap, network, and servers. For non-browser components, use a browser-compatible entry when the project provides one. Do not approximate the real component with invented markup.',
-    'Do not write files, install anything, run a command, or require Storybook. Return JSON only.',
-    JSON.stringify(project.components.map(({ name, file, exportName, framework }) => ({ name, file, exportName, framework }))),
-  ].join('\n\n');
-  let cli: ClaudeCli | undefined;
+  let step: ComponentScanStep = 'connect';
   let last = '';
-  let timer: ReturnType<typeof setTimeout>;
-  let cancel: () => void;
-  const result = new Promise<string>((done, fail) => {
-    cancel = () => fail(new Error('Component analysis cancelled.'));
-    timer = setTimeout(() => fail(new Error('Component analysis took too long.')), 5 * 60_000);
-    cli = new ClaudeCli({
-      claudePath, cwd: root, model, tools: READ_TOOLS, settingSources: '',
-      onPermission: async ({ toolName }) => READ_TOOLS.includes(toolName) ? { behavior: 'allow' } : { behavior: 'deny', message: 'Component analysis only reads source within the selected folder.' },
-      hooks: { PreToolUse: [{ matcher: READ_TOOLS.join('|'), id: 'check-source-path' }] },
-      onHook: async (_id, input) => {
-        const tool = asObject(input.tool_input);
-        const path = resolve(root, String(tool.file_path ?? tool.path ?? '.'));
-        const target = await realpath(path).catch(() => path);
-        if (!inside(root, path) || !inside(root, target)) return { decision: 'block', reason: 'Read within the selected folder.' };
-        const rel = relative(root, target);
-        if (/(^|[\\/])(?:\.env(?:\.[^/\\]*)?|\.git|node_modules)(?:[\\/]|$)/.test(rel)) return { decision: 'block', reason: 'Skip secrets, Git data and installed dependencies.' };
-        return {};
-      },
-      onMessage: (m) => {
-        if (m.type === 'assistant') {
-          const blocks = asObject(m.message).content;
-          if (Array.isArray(blocks)) {
-            const text = blocks.map(asObject).filter((b) => b.type === 'text').map((b) => String(b.text ?? '')).join('');
-            if (text.trim()) last = text;
-          }
+  let pending: { done(text: string): void; fail(error: Error): void } | undefined;
+  const seen = new Set<string>();
+  const cli = new ClaudeCli({
+    claudePath, cwd: root, model, tools: READ_TOOLS, settingSources: '',
+    appendSystemPrompt: skill,
+    onPermission: async ({ toolName }) => READ_TOOLS.includes(toolName) ? { behavior: 'allow' } : { behavior: 'deny', message: 'Component analysis only reads source within the selected folder.' },
+    hooks: { PreToolUse: [{ matcher: READ_TOOLS.join('|'), id: 'check-source-path' }] },
+    onHook: async (_id, input) => {
+      const tool = asObject(input.tool_input);
+      const path = resolve(root, String(tool.file_path ?? tool.path ?? '.'));
+      const target = await realpath(path).catch(() => path);
+      if (!inside(root, path) || !inside(root, target)) return { decision: 'block', reason: 'Read within the selected folder.' };
+      if (/(^|[\\/])(?:\.env(?:\.[^/\\]*)?|\.git|node_modules)(?:[\\/]|$)/.test(relative(root, target))) return { decision: 'block', reason: 'Skip secrets, Git data and installed dependencies.' };
+      return {};
+    },
+    onMessage: (m) => {
+      if (!pending) return;
+      if (m.type === 'assistant') {
+        const blocks = asObject(m.message).content;
+        if (!Array.isArray(blocks)) return;
+        const text: string[] = [];
+        for (const raw of blocks) {
+          const block = asObject(raw);
+          if (block.type === 'text') text.push(outputText(block.text));
+          if (block.type !== 'tool_use' || typeof block.id !== 'string' || seen.has(block.id)) continue;
+          seen.add(block.id);
+          const activity = toolActivity(root, block);
+          if (activity) progress(step, activity);
         }
-        if (m.type === 'result') {
-          if (m.subtype === 'success' && !m.is_error) done(String(m.result || last).trim());
-          else fail(new Error('Claude could not complete the component scan.'));
+        if (text.join('').trim()) last = text.join('').trim();
+      } else if (m.type === 'result') {
+        const result = pending;
+        pending = undefined;
+        const text = outputText(m.result) || last;
+        if (m.subtype === 'success' && !m.is_error) result.done(text);
+        else {
+          const errors = Array.isArray(m.errors) ? m.errors.map(outputText).filter(Boolean).join(' ') : '';
+          result.fail(new Error((errors || text || 'Claude could not complete this step.').slice(0, 500)));
         }
-      },
-      onExit: () => fail(new Error('Claude Code stopped during the component scan.')),
-    });
+      }
+    },
+    onExit: (code, stderr) => {
+      const detail = stderr.trim().split('\n').filter(Boolean).slice(-2).join(' ').slice(0, 500);
+      pending?.fail(new Error(detail || `Claude Code stopped during the scan${code === null ? '' : ` (exit ${code})`}.`));
+    },
   });
-  signal.addEventListener('abort', cancel!, { once: true });
-  if (signal.aborted) cancel!();
+  const cancel = () => {
+    pending?.fail(new Error('Component analysis cancelled.'));
+    cli.close();
+  };
+  signal.addEventListener('abort', cancel, { once: true });
+  function turn(next: ComponentScanStep, prompt: string) {
+    signal.throwIfAborted();
+    if (cli.closed) throw new Error('Claude Code stopped before the next scan step.');
+    step = next;
+    last = '';
+    progress(step);
+    return new Promise<string>((done, fail) => {
+      pending = { done, fail };
+      cli.sendUser(prompt);
+    });
+  }
+  const timer = setTimeout(() => {
+    pending?.fail(new Error('Claude Code did not finish this step in five minutes.'));
+    cli.close();
+  }, 5 * 60_000);
   try {
-    await Promise.race([cli!.ready, result]);
-    if (signal.aborted) throw new Error('Component analysis cancelled.');
-    cli!.sendUser(prompt);
-    const json = (await result).replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
-    return JSON.parse(json) as unknown;
+    await cli.ready;
+    await turn('inspect', 'Start the inspection step for the selected project. Read its source and return a short inventory with any preview requirements. Leave the JSON manifest for the next step.');
+    const inventory = project.components.map(({ name, file, exportName, framework }) => ({ name, file, exportName, framework }));
+    const response = await turn('catalog', `Build the component catalog from your inspection using the skill. Return the JSON manifest. Designer already found these components:\n${JSON.stringify(inventory)}`);
+    const json = response.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
+    try {
+      return JSON.parse(json) as unknown;
+    } catch (e) {
+      throw new Error('Claude returned an incomplete or invalid component manifest.', { cause: e });
+    }
   } finally {
-    clearTimeout(timer!);
-    signal.removeEventListener('abort', cancel!);
-    cli?.close();
+    pending = undefined;
+    clearTimeout(timer);
+    signal.removeEventListener('abort', cancel);
+    cli.close();
   }
 }
 
@@ -178,24 +226,31 @@ export class ComponentCatalog {
 
   recipe(key: string) { return this.recipes.get(key); }
 
-  async scan(project: ProjectInfo, claudePath: string | undefined, model: string | undefined, publish: () => void) {
+  async scan(project: ProjectInfo, claudePath: string | undefined, model: string | undefined, publish: (status: ComponentCatalogStatus) => void) {
     if (this.project !== project.path) return;
     this.job?.abort();
     if (!claudePath) {
-      this.status = { state: 'local' };
-      publish();
+      this.job = undefined;
+      this.status = { state: 'local', detail: 'Connect Claude Code to inspect the project and prepare more previews.' };
+      publish(this.status);
       return;
     }
     const job = new AbortController();
     this.job = job;
-    this.status = { state: 'scanning' };
-    publish();
+    const progress: ScanProgress = (step, activity) => {
+      if (this.job !== job) return;
+      if (this.status.state === 'scanning' && this.status.step === step && this.status.activity === activity) return;
+      this.status = { state: 'scanning', step, activity };
+      publish(this.status);
+    };
+    progress('connect');
     try {
-      const raw = await analyze(project, claudePath, model, job.signal);
+      const raw = await analyze(project, claudePath, model, job.signal, progress);
+      progress('validate');
       const recipes = await parseCatalog(project.path, raw);
       if (this.job !== job) return;
       this.recipes = recipes;
-      this.status = { state: 'ready' };
+      this.status = { state: 'ready', step: 'validate' };
       const path = this.cache(project.path);
       const temp = path + '.' + randomUUID();
       try {
@@ -208,11 +263,11 @@ export class ComponentCatalog {
         await rm(temp, { force: true }).catch(() => undefined);
       }
     } catch (e) {
-      this.status = this.job === job ? { state: 'failed', detail: (e as Error).message } : this.status;
+      this.status = this.job === job ? { state: 'failed', step: this.status.step, detail: (e as Error).message } : this.status;
     } finally {
       if (this.job === job) {
         this.job = undefined;
-        publish();
+        publish(this.status);
       }
     }
   }

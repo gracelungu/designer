@@ -124,8 +124,12 @@ export interface ComponentEntry {
   group?: string;
 }
 
+export type ComponentScanStep = 'connect' | 'inspect' | 'catalog' | 'validate';
+
 export interface ComponentCatalogStatus {
   state: 'scanning' | 'ready' | 'local' | 'failed';
+  step?: ComponentScanStep;
+  activity?: string;
   detail?: string;
 }
 
@@ -560,6 +564,7 @@ export type ServerMessage =
   | { type: 'history'; items: ChatItem[] }
   | { type: 'project'; project: ProjectInfo | null }
   | { type: 'component-catalog'; project: ProjectInfo }
+  | { type: 'component-scan'; path: string; catalog: ComponentCatalogStatus }
   | { type: 'run'; kind: 'app' | 'storybook'; url: string }
   | { type: 'setup'; setup: SetupState | null }
   | { type: 'canvas-op'; requestId: string; op: CanvasOp }
