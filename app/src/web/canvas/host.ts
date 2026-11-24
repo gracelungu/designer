@@ -1,7 +1,7 @@
 // Creates the canvas editor once, with its toolbar, layers and properties panels, so React can
 // place those panels in the app's own sidebars without remounting them.
 import { bindShortcuts, cssFor, emptyDoc, Editor, exportSVG, LayersPanel, PropertiesPanel, Toolbar } from '../../../../editor/src/index.js';
-import type { CanvasComment, CanvasOp, PreviewFrame } from '../../shared/protocol';
+import { componentKey, type CanvasComment, type CanvasOp, type ComponentEntry, type ComponentSource, type PreviewFrame } from '../../shared/protocol';
 import { api } from '../api';
 import { buildNodes, canvasState, freeSpot, placeAt, selectionContext, storyIds, applySimple } from './convert';
 
@@ -16,6 +16,8 @@ export interface CanvasHost {
   flush(): Promise<void>;
   canSync(): boolean;
   apply(op: CanvasOp): Promise<unknown>;
+  placeComponent(project: string, component: ComponentEntry, nextToSelection?: boolean): Promise<string>;
+  reconnectComponents(): void;
   placeStory(storyId: string, opts?: { nextToSelection?: boolean; title?: string; file?: string; args?: Record<string, unknown> }): Promise<string>;
   showPage(url: string, name?: string): Promise<string>;
   state(): ReturnType<typeof canvasState>;
@@ -97,6 +99,44 @@ export function canvasHost(onAskAI: () => void): CanvasHost {
     return out;
   };
 
+  let canvasProject: string | undefined;
+  const sourceUrl = (project: string, source: ComponentSource, rebuild = false) =>
+    api<{ src: string }>('/api/components/preview', { project, ...source, rebuild });
+
+  const reconnectComponents = (rebuild = false) => {
+    const project = canvasProject;
+    if (!project) return;
+    const generation = loadId;
+    const sources = new Map<string, { source: ComponentSource; ids: string[] }>();
+    for (const id of store.allIds()) {
+      const code = store.get(id)?.code;
+      if (!code?.source || (!rebuild && code.src)) continue;
+      const key = componentKey(code.source);
+      if (!sources.has(key)) sources.set(key, { source: code.source, ids: [] });
+      sources.get(key)!.ids.push(id);
+    }
+    void (async () => {
+      for (const { source, ids } of sources.values()) {
+        if (generation !== loadId) return;
+        try {
+          const { src } = await sourceUrl(project, source, rebuild);
+          if (generation !== loadId) return;
+          for (const id of ids) {
+            const node = store.get(id);
+            if (!node?.code?.source || componentKey(node.code.source) !== componentKey(source)) continue;
+            const frame = editor.code.frames.get(id);
+            if (node.code.src === src && !rebuild) continue;
+            if (node.code.src === src && frame) frame.iframe.src = src;
+            node.code.src = src;
+          }
+          store.emit('doc');
+        } catch {
+          // A deleted or unbuildable source stays on the canvas as a linked placeholder.
+        }
+      }
+    })();
+  };
+
   const focusOn = (ids: string[]) => {
     store.select(ids);
     const b = store.selectionBox(ids);
@@ -124,8 +164,9 @@ export function canvasHost(onAskAI: () => void): CanvasHost {
       loading = true;
       const id = ++loadId;
       try {
-        const r = await api<{ data: { doc?: { comments?: unknown[] }; assets?: Record<string, string> } | null; comments?: CanvasComment[]; author?: string }>('/api/canvas').catch(() => ({ data: null, comments: [] as CanvasComment[], author: undefined }));
+        const r = await api<{ project?: string; data: { doc?: { comments?: unknown[] }; assets?: Record<string, string> } | null; comments?: CanvasComment[]; author?: string }>('/api/canvas').catch(() => ({ data: null, comments: [] as CanvasComment[], author: undefined, project: undefined }));
         if (id !== loadId) return;
+        canvasProject = r.project;
         const data = r.data;
         if (data && data.doc) store.load(data.doc, data.assets ?? {});
         else store.load(emptyDoc(), {});
@@ -141,6 +182,7 @@ export function canvasHost(onAskAI: () => void): CanvasHost {
           if (n?.type === 'code' && n.code) n.code.src = null;
         }
         store.emit('doc');
+        reconnectComponents();
         requestAnimationFrame(() => (store.doc.root.length ? editor.zoomToFit() : undefined));
       } finally {
         if (id === loadId) loading = false;
@@ -182,6 +224,9 @@ export function canvasHost(onAskAI: () => void): CanvasHost {
           });
           return { updated: op.updates.length - missing.length, missing };
         }
+        case 'show-source-component':
+          for (let i = 0; loading && i < 50; i++) await new Promise((done) => setTimeout(done, 100));
+          return { id: await host!.placeComponent(op.project, op.component, op.nextToSelection) };
         case 'show-component':
           return { id: await host!.placeStory(op.storyId, { nextToSelection: op.nextToSelection, title: op.title, file: op.file, args: op.args }) };
         case 'show-page':
@@ -191,6 +236,30 @@ export function canvasHost(onAskAI: () => void): CanvasHost {
           return { selected: op.ids };
       }
     },
+    async placeComponent(project, component, nextToSelection = false) {
+      if (loading || canvasProject !== project) throw new Error('Wait for the project canvas to open.');
+      const generation = loadId;
+      const source = { file: component.file, exportName: component.exportName };
+      const { src } = await sourceUrl(project, source, true);
+      if (generation !== loadId) throw new Error('The active canvas changed.');
+      const id = store.transact(() => {
+        const existing = !nextToSelection && store.allIds().map((id) => store.get(id)!).find((node) =>
+          node.code?.source && componentKey(node.code.source) === componentKey(source));
+        if (existing && existing.code) {
+          const frame = editor.code.frames.get(existing.id);
+          if (existing.code.src === src && frame) frame.iframe.src = src;
+          existing.code.src = src;
+          return existing.id;
+        }
+        const spot = freeSpot(store, nextToSelection || store.selection.length > 0);
+        const node = store.create('code', { x: spot.x, y: spot.y, name: component.name });
+        node.code = { kind: 'component', src, title: component.name, hug: true, args: {}, source, file: source.file };
+        return node.id;
+      });
+      focusOn([id]);
+      return id;
+    },
+    reconnectComponents,
     async placeStory(storyId, opts = {}) {
       const src = (await storySrc([storyId]))[storyId];
       const id = store.transact(() => {
@@ -290,9 +359,10 @@ export function canvasHost(onAskAI: () => void): CanvasHost {
       });
     },
     reloadLive() {
+      reconnectComponents(true);
       for (const [id, fr] of editor.code.frames) {
         const n = store.get(id);
-        if (n?.type === 'code' && n.code?.src) fr.iframe.src = n.code.src;
+        if (n?.type === 'code' && n.code?.src && !n.code.source) fr.iframe.src = n.code.src;
       }
     },
     context: () => selectionContext(store),

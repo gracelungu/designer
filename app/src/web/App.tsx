@@ -51,9 +51,9 @@ export function App() {
   if (!status) return <div className="welcome">Starting Designer…</div>;
   if (!status.onboarded)
     return (
-      <Onboarding demo={status.demo} onDone={(choice) => {
+      <Onboarding demo={status.demo} home={status.home} onDone={(choice, project) => {
         setStart(choice);
-        setStatus({ ...status, onboarded: true });
+        setStatus({ ...status, project: project ?? status.project, onboarded: true });
       }} />
     );
   return <Workspace status={status} start={start} onRecheck={(claude) => setStatus({ ...status, claude })} />;
@@ -95,7 +95,7 @@ function Workspace({ status, start, onRecheck }: { status: Status; start?: Start
   const [revealSetup, setRevealSetup] = useState(0);
   const [caps, setCaps] = useState<Capabilities>();
   const [capsError, setCapsError] = useState('');
-  const [left, setLeft] = useState<LeftTab>('layers');
+  const [left, setLeft] = useState<LeftTab>(status.project || start === 'demo' ? 'components' : 'layers');
   const [chatView, setChatView] = useState<ChatView>('chat');
   const [side, setSide] = useState<'figma' | 'code'>('figma');
   const [codeTab, setCodeTab] = useState<'layer' | 'tokens' | 'changes'>('changes');
@@ -158,6 +158,11 @@ function Workspace({ status, start, onRecheck }: { status: Status; start?: Start
         void api<VisualReview[]>('/api/visual-reviews').then(setReviews, () => setReviews([]));
         return;
       }
+      if (m.type === 'component-catalog') {
+        setProject((current) => current?.path === m.project.path ? m.project : current);
+        if (m.project.catalog?.state === 'ready') host.reconnectComponents();
+        return;
+      }
       if (m.type === 'setup') {
         setSetup(m.setup);
         // A finished setup may have installed or found new things: refresh the components list.
@@ -215,15 +220,15 @@ function Workspace({ status, start, onRecheck }: { status: Status; start?: Start
         } catch (e) {
           setToast({ text: (e as Error).message });
         }
-      } else if (start === 'project') setModal('project');
-      else if (start === 'blank' && path) {
+      } else if (start === 'blank' && path) {
         await api('/api/project/close', {});
         path = null;
-      } else if (!start && last) {
+      } else if ((!start || start === 'project') && last) {
         try {
           const info = await api<ProjectInfo>('/api/project', { path: last, setup: false });
           path = info.path;
           setProject(info);
+          setLeft('components');
         } catch {
           lsDel('designer.lastProject');
         }
@@ -358,7 +363,7 @@ function Workspace({ status, start, onRecheck }: { status: Status; start?: Start
       ]
     : [
         { label: 'Open a project from my dev folder', prompt: 'List the projects in my usual dev folders (like ~/dev, ~/code, ~/Projects) and ask me which one to open.' },
-        { label: 'Start a new project from scratch', prompt: 'Let’s start a new web project from scratch in Designer’s folder. Ask me what it’s for, then set it up with a component library and Storybook, open it, and run it.' },
+        { label: 'Start a new project from scratch', prompt: 'Let’s start a new web project from scratch in Designer’s folder. Ask me what it’s for, build the components, then open the project.' },
         { label: 'Sketch a screen on the canvas', prompt: 'Sketch a clean sign-in screen on the canvas as editable layers, using auto layout.' },
       ];
 
@@ -389,7 +394,7 @@ function Workspace({ status, start, onRecheck }: { status: Status; start?: Start
     await host.apply({
       kind: 'add-nodes',
       nextToSelection: true,
-      nodes: [{ type: 'frame', name: component.name, w: 240, h: 120, codeLink: { file: component.file, exportName: component.exportName || undefined, storyId: component.storyIds[0] } }],
+      nodes: [{ type: 'frame', name: component.name, w: 240, h: 120, codeLink: { file: component.file, exportName: component.exportName || undefined } }],
     });
   };
 
@@ -451,7 +456,7 @@ function Workspace({ status, start, onRecheck }: { status: Status; start?: Start
                 </button>
               )}
               <button className="opt" onClick={() => { setProjectMenu(false); void runPreview().catch((e: Error) => setToast({ text: e.message })); }}>
-                <span>Run preview</span>
+                <span>Run full app</span>
               </button>
               {setup && (
                 <button className="opt" onClick={() => (setRevealSetup((n) => n + 1), setProjectMenu(false))}>
@@ -530,15 +535,13 @@ function Workspace({ status, start, onRecheck }: { status: Status; start?: Start
             <ComponentsPanel
               key={project?.path}
               project={project}
-              running={setup?.status === 'running'}
               opening={openingProject || !workspaceReady}
-              onPlace={placeStory}
+              onPlace={async (component) => {
+                if (project) await host.placeComponent(project.path, component);
+              }}
               onDesign={placeDesign}
-              onRun={runPreview}
-              onAttach={async (url) => { await host.showPage(url); }}
-              onRefresh={refreshProject}
-              onAddSource={async (values) => {
-                const next = await api<ProjectInfo>('/api/components', { ...values, project: project?.path });
+              onScan={async () => {
+                const next = await api<ProjectInfo>('/api/components/scan', { project: project?.path });
                 setProject((current) => current?.path === next.path ? next : current);
               }}
               onAddProject={() => setModal('project')}

@@ -8,6 +8,7 @@ export interface ToolHost {
   canvasState(): unknown;
   addNodes(nodes: unknown[], nextToSelection: boolean): Promise<unknown>;
   updateNodes(updates: unknown[]): Promise<unknown>;
+  showSourceComponent?(file: string, exportName: string | undefined, nextToSelection: boolean): Promise<string>;
   showComponent(storyId: string, args: Record<string, unknown> | undefined, nextToSelection: boolean): Promise<string>;
   designTokens(status?: string): Promise<unknown>;
   /** Comments pinned on the canvas, as text. */
@@ -92,15 +93,17 @@ export const TOOLS = [
   {
     name: 'show_component',
     description:
-      "Place one coded component from this repo on the canvas, rendered live from code as a design layer (no Storybook UI), sized to its content. Identify it by Storybook story id (e.g. 'components-button--primary'). Starts Storybook if it isn't running. Use nextToSelection to put it beside a design for comparison.",
+      'Place one isolated component from the open project on the canvas, live from its source file. Use the project-relative file and exact export name from the component catalog. Use nextToSelection to place it beside a design for comparison. An existing story can also be requested by id.',
     inputSchema: {
       type: 'object',
       properties: {
-        storyId: { type: 'string' },
+        file: { type: 'string', description: 'Project-relative component source file' },
+        exportName: { type: 'string', description: 'Exact export name, or default. Omit for a template or sole export.' },
+        storyId: { type: 'string', description: 'Optional legacy story id instead of a source file' },
         args: { type: 'object', description: 'Props to render it with' },
         nextToSelection: { type: 'boolean' },
       },
-      required: ['storyId'],
+      anyOf: [{ required: ['file'] }, { required: ['storyId'] }],
     },
   },
   {
@@ -192,6 +195,7 @@ async function callTool(name: string, a: Record<string, unknown>, host: ToolHost
     case 'update_layers':
       return json(await host.updateNodes(Array.isArray(a.updates) ? a.updates : []));
     case 'show_component':
+      if (typeof a.file === 'string' && host.showSourceComponent) return host.showSourceComponent(a.file, typeof a.exportName === 'string' ? a.exportName : undefined, !!a.nextToSelection);
       return host.showComponent(String(a.storyId ?? ''), a.args as Record<string, unknown> | undefined, !!a.nextToSelection);
     case 'get_design_tokens':
       return json(await host.designTokens(a.status ? String(a.status) : undefined));
@@ -209,12 +213,12 @@ async function callTool(name: string, a: Record<string, unknown>, host: ToolHost
 export const SYSTEM_PROMPT = `You are running inside Designer, a Figma-like canvas app that sits on top of the user's code. The user is often a designer: explain in plain words, keep git jargon out unless asked, and show your work on the canvas when it helps.
 
 Designer gives you tools (the "designer" MCP server):
-- open_project: when the user mentions a project or folder, find it on disk and open it. If no project is open and the request needs one, ask which project, or look in common places (~/dev, ~/code, ~/Projects, ~/src) for a match. Opening a project indexes source files. Start a preview with run_project when the user asks to see the running app or a component.
+- open_project: when the user mentions a project or folder, find it on disk and open it. If no project is open and the request needs one, ask which project, or look in common places (~/dev, ~/code, ~/Projects, ~/src) for a match. Opening a project indexes source files. Use show_component to display a component by source. Start the full app only when the user asks for an app preview.
 - run_project: start (or restart) the project's dev server (kind "app") or its Storybook (kind "storybook") with a command you choose. Use it to fix a failed setup or when the user asks.
 - get_canvas: read what the user has selected on the canvas.
 - add_to_canvas / update_layers: put editable design layers on the canvas (for example a frame you read from Figma with the figma MCP server, or a layout from scratch). Use real values and auto layout.
 - get_design_tokens: the repo's tokens paired with the Figma variables, with drift. Style with these tokens, never raw values when a token exists. When code and Figma disagree, Figma is the design source unless the user says otherwise.
 - get_comments / reply_to_comment: read the comments the team pinned on canvas frames, and answer or resolve them when you address them.
-- show_component: render one coded component (by Storybook story id) on the canvas as a design layer, live from code, so it can sit next to its Figma design and look identical. It needs the project to use Storybook.
+- show_component: render a single live component by source file and export name. Open it beside a design to compare the two.
 
-Projects differ: follow what setup found (the note about how this project runs). When the project previews as a running app, edit the code and the app frame on the canvas updates live; point the user to the page that shows the change. When it has Storybook, a coded component should match a design this way: read the design (Figma MCP or get_canvas), use the repo's own tokens and components, then show_component next to the design and compare. Only add Storybook or new stories when the user wants single components on the canvas and the repo already uses Storybook, or the user agrees to add it.`;
+Projects differ: follow what setup found (the note about how this project runs). When the project previews as a running app, edit the code and the app frame on the canvas updates live; point the user to the page that shows the change. To match a design, read it (Figma MCP or get_canvas), use the repo's tokens and components, then use show_component next to the design and compare.`;

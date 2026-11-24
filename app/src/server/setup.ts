@@ -292,15 +292,14 @@ const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'build', '.next', '.n
 /** Files that are routes, pages or app entry points rather than reusable components. */
 const NOT_COMPONENT = /(^|\/)(pages|routes)\/|(^|\/)app\/(.*\/)?(page|layout|loading|error|not-found|template|route|default)\.[jt]sx?$|(^|\/)(main|App|_app|_document|root|entry\.(client|server)|setupTests|vite-env\.d)\.[jt]sx?$|(^|\/)App\.(vue|svelte)$|\.(stories|story|test|spec|d)\.[jt]sx?$|\+(page|layout|error)\.svelte$/;
 
-async function walkSources(dir: string, root: string, acc: string[], depth = 0) {
-  if (depth > 10 || acc.length >= 2000) return;
+async function walkSources(dir: string, root: string, acc: string[]) {
   const entries = await readdir(dir, { withFileTypes: true }).catch(() => []);
   for (const e of entries) {
     if (e.name.startsWith('.')) continue;
     const p = join(dir, e.name);
     if (e.isDirectory()) {
-      if (!SKIP_DIRS.has(e.name)) await walkSources(p, root, acc, depth + 1);
-    } else if (/\.(tsx|jsx|vue|svelte)$/.test(e.name) || /\.[jt]s$/.test(e.name) && /components?\//.test(relative(root, p))) acc.push(p);
+      if (!SKIP_DIRS.has(e.name)) await walkSources(p, root, acc);
+    } else if (e.isFile() && (/\.(tsx|jsx|vue|svelte)$/.test(e.name) || /\.(?:[jt]s|html)$/.test(e.name) && /(?:^|[\\/])components?[\\/]/i.test(relative(root, p)))) acc.push(p);
   }
 }
 
@@ -509,15 +508,18 @@ export async function indexComponents(cwd: string, stories: StoryEntry[] = []): 
     const ext = extname(file);
     if (ext === '.vue' || ext === '.svelte') {
       const name = basename(file, ext);
-      if (!isPascal(name)) continue;
       const props = ext === '.vue' ? parseVueProps(src) : parseSvelteProps(src);
       out.push({ name, file, exportName: 'default', framework: ext === '.vue' ? 'vue' : 'svelte', props, storyIds: [] });
+      continue;
+    }
+    if (ext === '.html') {
+      out.push({ name: basename(file, ext), file, exportName: '', framework: 'custom', props: [], storyIds: [] });
       continue;
     }
     for (const c of parseReactComponents(src)) {
       out.push({ name: c.name, file, exportName: c.exportName, framework: 'react', props: c.props, storyIds: [] });
     }
-    if (out.length >= 1000) break;
+
   }
   linkStories(out, stories);
   return out.sort((a, b) => a.name.localeCompare(b.name) || a.file.localeCompare(b.file));

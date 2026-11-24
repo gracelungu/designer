@@ -1,28 +1,20 @@
 import { useState } from 'react';
-import type { ComponentEntry, ProjectInfo } from '../../shared/protocol';
+import { componentKey, type ComponentEntry, type ProjectInfo } from '../../shared/protocol';
 
-export function ComponentsPanel({
-  project, onPlace, onDesign, onRun, onAttach, onRefresh, onAddSource, onAddProject, running, opening,
-}: {
+export function ComponentsPanel({ project, onPlace, onDesign, onScan, onAddProject, opening }: {
   project: ProjectInfo | null;
-  onPlace: (storyId: string) => Promise<void>;
+  onPlace: (component: ComponentEntry) => Promise<void>;
   onDesign: (component: ComponentEntry) => Promise<void>;
-  onRun: () => Promise<void>;
-  onAttach: (url: string) => Promise<void>;
-  onRefresh: () => Promise<void>;
-  onAddSource: (source: { name: string; file: string; exportName: string }) => Promise<void>;
+  onScan: () => Promise<void>;
   onAddProject: () => void;
-  running: boolean;
   opening: boolean;
 }) {
   const [filter, setFilter] = useState('');
-  const [previewOpen, setPreviewOpen] = useState(false);
-  const [sourceOpen, setSourceOpen] = useState(false);
-  const [url, setUrl] = useState('');
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
+  const [details, setDetails] = useState<string>();
 
-  const act = async (action: string, fn: () => Promise<void>) => {
+  async function act(action: string, fn: () => Promise<void>) {
     setBusy(action);
     setError('');
     try {
@@ -32,84 +24,60 @@ export function ComponentsPanel({
     } finally {
       setBusy('');
     }
-  };
+  }
 
   if (!project) return <div className="empty"><button className="btn" onClick={onAddProject}>Open a project</button></div>;
 
-  const blocked = opening || !!busy;
-  const components = project.components ?? [];
-  const stories = project.stories.flatMap((entry) => entry.stories.map((story) => ({ ...story, title: entry.title, file: entry.file })));
-  const byId = new Map(stories.map((story) => [story.id, story]));
-  const linked = new Set(components.flatMap((component) => component.storyIds));
   const query = filter.trim().toLowerCase();
-  const matches = (...text: string[]) => text.some((value) => value.toLowerCase().includes(query));
-  const rows = components.filter((c) => matches(c.name, c.file, c.exportName, ...c.storyIds.map((id) => byId.get(id)?.name ?? '')));
-  const examples = stories.filter((s) => !linked.has(s.id) && matches(s.title, s.name, s.file));
-  const place = (id: string, label: string) => (
-    <button key={id} className="comp-story" disabled={blocked} onClick={() => void act(id, () => onPlace(id))}>
-      <span>{label}</span>
-      <span className="faint">{busy === id ? 'Opening…' : 'Preview'}</span>
-    </button>
-  );
+  const grouped = new Map<string, ComponentEntry[]>();
+  for (const component of project.components) {
+    if (!`${component.name} ${component.group ?? ''} ${component.file}`.toLowerCase().includes(query)) continue;
+    const group = component.group ?? '';
+    if (!grouped.has(group)) grouped.set(group, []);
+    grouped.get(group)!.push(component);
+  }
+  const groups = [...grouped].sort(([a], [b]) => !a ? 1 : !b ? -1 : a.localeCompare(b));
+  const scanning = project.catalog?.state === 'scanning';
+  const unavailable = opening || !!busy;
 
   return (
     <div className="scroll components-panel">
       <div className="component-controls">
         <input className="input" aria-label="Search components" placeholder="Search components" value={filter} onChange={(e) => setFilter(e.target.value)} />
-        <button className="btn small" disabled={blocked} onClick={() => void act('refresh', onRefresh)}>Refresh</button>
+        <button className="btn small" disabled={unavailable || scanning} onClick={() => void act('scan', onScan)}>Rescan</button>
       </div>
-      <div className="component-controls">
-        <button className="btn small" disabled={running || blocked} onClick={() => void act('run', onRun)}>{running ? 'Starting…' : 'Run preview'}</button>
-        <button className="btn small ghost" onClick={() => setPreviewOpen(!previewOpen)} aria-expanded={previewOpen}>Use a local URL</button>
-        <button className="btn small ghost" onClick={() => setSourceOpen(!sourceOpen)} aria-expanded={sourceOpen}>Add source</button>
-      </div>
-      {previewOpen && (
-        <form className="component-controls" onSubmit={(e) => {
-          e.preventDefault();
-          void act('attach', async () => { await onAttach(url.trim()); setPreviewOpen(false); });
-        }}>
-          <input className="input" type="url" aria-label="Local preview URL" placeholder="http://localhost:3000" required value={url} onChange={(e) => setUrl(e.target.value)} />
-          <button className="btn small" disabled={blocked}>Open</button>
-        </form>
-      )}
-      {sourceOpen && (
-        <form className="component-source-form" onSubmit={(event) => {
-          event.preventDefault();
-          const fields = new FormData(event.currentTarget);
-          void act('add', async () => {
-            await onAddSource({ name: String(fields.get('name')), file: String(fields.get('file')), exportName: String(fields.get('exportName')) });
-            setFilter('');
-            setSourceOpen(false);
-          });
-        }}>
-          <label>Component name<input className="input" name="name" required /></label>
-          <label>File path in the project<input className="input" name="file" placeholder="templates/badge.html" required /></label>
-          <label>Export name (optional)<input className="input" name="exportName" /></label>
-          <button className="btn small primary" disabled={blocked}>Add component</button>
-        </form>
-      )}
+      {scanning && <div className="hint" role="status">Claude is analyzing the project…</div>}
+      {busy && busy !== 'scan' && <div className="hint" role="status">Preparing component preview…</div>}
       {error && <div className="error-box" role="alert">{error}</div>}
-      {project.componentNotes?.map((note) => <div key={note} className="hint">{note}</div>)}
-      {!rows.length && !examples.length && (
-        <div className="hint">{query ? 'No matching components.' : 'No components found. Add a source file or open a running preview.'}</div>
-      )}
-      {rows.map((c) => (
-        <div key={`${c.file}#${c.exportName}`} className="comp-entry">
-          <div className="comp-head" title={c.file}>
-            <span className="code-glyph">{'</>'}</span>
-            <span className="comp-name">{c.name}</span>
-          </div>
-          <div className="comp-props mono" title={c.file}>{c.file}</div>
-          {c.props.length > 0 && <div className="comp-props mono">{c.props.slice(0, 8).map((p) => `${p.name}${p.optional ? '?' : ''}`).join(', ')}{c.props.length > 8 ? ', …' : ''}</div>}
-          {c.storyIds.map((id) => byId.get(id)).map((s) => s && place(s.id, s.name))}
-          <button className="comp-story" disabled={blocked} onClick={() => void act(`${c.file}#${c.exportName}`, () => onDesign(c))}>
-            <span>Add editable frame</span>
-            <span className="faint">Linked to source</span>
-          </button>
-        </div>
+      {project.catalog?.state === 'failed' && <div className="hint" role="status">{project.catalog.detail} Source discovery is still available.</div>}
+      {!!project.componentNotes?.length && <details className="hint"><summary>Catalog notes</summary>{project.componentNotes.map((note) => <p key={note}>{note}</p>)}</details>}
+      {!groups.length && <div className="hint">{query ? 'No matching components.' : scanning ? 'Discovered components will appear here.' : 'No reusable components found.'}</div>}
+      {groups.map(([group, components]) => (
+        <section key={group} className="catalog-group" aria-label={group || 'Components'}>
+          {(group || groups.length > 1) && <h3 className="comp-section">{group || 'Ungrouped'}</h3>}
+          {components.map((component) => {
+            const key = componentKey(component);
+            const expanded = details === key;
+            return (
+              <div key={key} className="comp-entry">
+                <div className="catalog-row">
+                  <button className="catalog-component" disabled={unavailable} onClick={() => void act(key, () => onPlace(component))}>
+                    <span className="catalog-diamond" aria-hidden="true">◇</span>
+                    <span>{component.name}</span>
+                  </button>
+                  <button className="catalog-info" aria-expanded={expanded} aria-label={`Details for ${component.name}`} onClick={() => setDetails(expanded ? undefined : key)}>ⓘ</button>
+                </div>
+                {expanded && <div className="catalog-details">
+                  <div className="mono">{component.file}</div>
+                  {component.exportName && <div>Export <code>{component.exportName}</code></div>}
+                  {component.props.length > 0 && <div>Props <code>{component.props.map((p) => p.name + (p.optional ? '?' : '')).join(', ')}</code></div>}
+                  <button className="btn small" disabled={unavailable} onClick={() => void act('design', () => onDesign(component))}>Add empty linked frame</button>
+                </div>}
+              </div>
+            );
+          })}
+        </section>
       ))}
-      {examples.length > 0 && <div className="comp-section">More previews</div>}
-      {examples.map((s) => place(s.id, `${s.title.split('/').pop()} / ${s.name}`))}
     </div>
   );
 }

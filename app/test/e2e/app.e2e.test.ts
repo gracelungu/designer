@@ -1,7 +1,7 @@
 // Drives the built Designer UI in Chromium, like a designer would, from first launch
 // through the demo project, chat, tokens, canvas, Figma and versions.
 // Claude Code is the stand-in at test/fixtures/fake-claude.mjs.
-import { existsSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { chromium, type Browser, type Page } from 'playwright';
@@ -54,7 +54,7 @@ describe('first run onboarding', () => {
   it('opens a copy of the demo with its components', async () => {
     await page.locator('.chip-text b', { hasText: 'Lumen demo' }).waitFor();
     expect(existsSync(join(workspace, 'Lumen demo', 'src', 'tokens.css'))).toBe(true);
-    for (const name of ['Badge', 'Button', 'PriceCard']) await page.locator('.comp-name', { hasText: new RegExp(`^${name}$`) }).waitFor();
+    for (const name of ['Badge', 'Button', 'PriceCard']) await page.getByRole('button', { name, exact: true }).waitFor();
     await shot('04-demo-open');
   });
 
@@ -285,7 +285,8 @@ describe('without Claude Code', () => {
     const saved = process.env.DESIGNER_CLAUDE_PATH;
     const savedPath = process.env.PATH;
     const dir = realpathSync(mkdtempSync(join(tmpdir(), 'designer-custom-')));
-    writeFileSync(join(dir, 'badge.html'), '<span class="badge">Badge</span>');
+    mkdirSync(join(dir, 'components', 'Primitives'), { recursive: true });
+    writeFileSync(join(dir, 'components', 'Primitives', 'Badge.html'), '<span class="badge">Original badge markup</span>');
     process.env.DESIGNER_CLAUDE_PATH = '/nonexistent/claude';
     process.env.PATH = '/nonexistent';
     const bare = await startServer({ workspace: join(dir, 'Designer'), staticDir: STATIC });
@@ -301,16 +302,16 @@ describe('without Claude Code', () => {
       });
       await p.evaluate((path) => localStorage.setItem('test-project', path), dir);
       await p.getByRole('button', { name: 'Open a project', exact: true }).click();
-      await p.getByRole('button', { name: 'Choose folder…' }).click();
-      await p.getByRole('button', { name: 'Add source', exact: true }).click();
-      await p.getByRole('textbox', { name: 'Component name' }).fill('Template Badge');
-      await p.getByRole('textbox', { name: 'File path in the project' }).fill('badge.html');
-      await p.getByRole('button', { name: 'Add component' }).click();
       await p.getByRole('textbox', { name: 'Search components' }).fill('badge.html');
-      await p.getByText('Template Badge', { exact: true }).waitFor();
+      await p.getByRole('heading', { name: 'Primitives' }).waitFor();
+      expect(await p.getByRole('region', { name: 'Primitives' }).getByText('components/Primitives/Badge.html', { exact: true }).count()).toBe(0);
+      await p.getByRole('button', { name: 'Badge', exact: true }).click();
+      await p.frameLocator('.dz-live-node iframe').getByText('Original badge markup').waitFor();
       const session = await fetch(`${bare.url}/api/project/setup`, { headers: { 'x-designer-token': bare.token } });
       expect(await session.json()).toBeNull();
-      await p.getByRole('button', { name: /Add editable frame/ }).click();
+      await p.getByRole('button', { name: 'Details for Badge' }).click();
+      await p.getByRole('region', { name: 'Primitives' }).getByText('components/Primitives/Badge.html', { exact: true }).waitFor();
+      await p.getByRole('button', { name: 'Add empty linked frame' }).click();
       await p.getByRole('tab', { name: 'Code' }).click();
       await p.getByText('Design layer linked to source').waitFor();
       await p.evaluate(() => {
@@ -321,7 +322,7 @@ describe('without Claude Code', () => {
       await p.context().grantPermissions(['clipboard-read', 'clipboard-write']);
       await p.getByRole('button', { name: 'Copy changes' }).click();
       await p.getByRole('button', { name: 'Copied' }).waitFor();
-      expect(await p.evaluate(() => navigator.clipboard.readText())).toContain('badge.html');
+      expect(await p.evaluate(() => navigator.clipboard.readText())).toContain('Badge.html');
       expect(await p.getByRole('button', { name: 'Propose code change' }).count()).toBe(0);
       await p.getByRole('button', { name: 'Mark implemented' }).click();
       await p.getByTestId('sync-pending').waitFor({ state: 'detached' });
@@ -337,5 +338,65 @@ describe('without Claude Code', () => {
 describe('page health', () => {
   it('had no uncaught errors', () => {
     expect(errors).toEqual([]);
+  });
+});
+
+describe('isolated source previews', () => {
+  it('mounts a real React component and an agent-discovered custom component from a folder with no scripts', async () => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), 'designer-source-preview-')));
+    const project = join(dir, 'project');
+    const custom = join(project, 'widgets', 'metrics.el');
+    const oldCatalog = process.env.FAKE_CLAUDE_CATALOG;
+    process.env.FAKE_CLAUDE_CATALOG = JSON.stringify({ components: [{
+      name: 'Metrics', file: 'widgets/metrics.el', exportName: '', framework: 'custom',
+      group: 'Instruments',
+      renderer: "import source from './metrics.el?raw'; export function mount(root) { root.textContent = source; }",
+    }] });
+    mkdirSync(join(project, 'src', 'components', 'Forms'), { recursive: true });
+    mkdirSync(join(project, 'widgets'));
+    symlinkSync(join(APP, 'node_modules'), join(project, 'node_modules'), 'junction');
+    writeFileSync(join(project, 'package.json'), JSON.stringify({ dependencies: { react: '*', 'react-dom': '*' } }));
+    writeFileSync(join(project, 'tsconfig.json'), JSON.stringify({ compilerOptions: { paths: { '@ui/*': ['./src/*'] } } }));
+    writeFileSync(join(project, 'src', 'main.tsx'), "import './theme.css'; throw new Error('The app entry must never run');");
+    writeFileSync(join(project, 'src', 'theme.css'), 'button{background-color:rgb(8, 92, 81)}');
+    writeFileSync(join(project, 'src', 'label.ts'), "export const prefix = 'Submit';");
+    writeFileSync(join(project, 'src', 'components', 'Forms', 'SubmitButton.tsx'),
+      "import { useState } from 'react'; import { prefix } from '@ui/label'; export function SubmitButton({ label }: { label: string }) { const [count, setCount] = useState(0); return <button onClick={() => setCount(count + 1)}>{prefix}: {label} {count}</button>; }");
+    writeFileSync(custom, 'Content from a custom format');
+    const server = await startServer({ workspace: join(dir, 'Designer'), staticDir: STATIC, initialProject: project });
+    let p: Page | undefined;
+    try {
+      p = await openPage(server.url);
+      await p.getByRole('button', { name: 'Start with a blank canvas', exact: true }).waitFor();
+      await p.getByRole('button', { name: 'Open a project', exact: true }).click();
+      await p.getByText('Enter a folder path', { exact: true }).click();
+      await p.getByRole('textbox', { name: 'Project folder path' }).fill(project);
+      await p.getByRole('button', { name: 'Open path' }).click();
+      await p.getByRole('heading', { name: 'Forms' }).waitFor();
+      await p.getByRole('button', { name: 'SubmitButton', exact: true }).click();
+      const iframe = p.locator('.dz-live-node iframe').first();
+      const button = p.frameLocator('.dz-live-node iframe').first().getByRole('button', { name: 'Submit: SubmitButton 0' });
+      await button.waitFor({ timeout: 10000 });
+      expect(await button.evaluate((element) => getComputedStyle(element).backgroundColor)).toBe('rgb(8, 92, 81)');
+      expect(await iframe.getAttribute('sandbox')).toBe('allow-scripts');
+      await button.evaluate((element: HTMLButtonElement) => element.click());
+      await p.frameLocator('.dz-live-node iframe').first().getByRole('button', { name: 'Submit: SubmitButton 1' }).waitFor();
+      await p.getByRole('button', { name: 'SubmitButton', exact: true }).click();
+      await expect.poll(() => p!.locator('.dz-live-node iframe').count()).toBe(1);
+
+      await p.getByRole('heading', { name: 'Instruments' }).waitFor();
+      await p.getByRole('button', { name: 'Metrics', exact: true }).click();
+      await p.frameLocator('.dz-live-node iframe').nth(1).getByText('Content from a custom format').waitFor();
+      await expect.poll(() => existsSync(join(project, '.designer', 'canvas.json')) && readFileSync(join(project, '.designer', 'canvas.json'), 'utf8').includes('widgets/metrics.el')).toBe(true);
+      await p.reload();
+      await p.frameLocator('.dz-live-node iframe').nth(1).getByText('Content from a custom format').waitFor();
+      expect((await (await fetch(`${server.url}/api/run`, { headers: { 'x-designer-token': server.token } })).json())).toEqual({ app: null, storybook: null });
+    } finally {
+      if (oldCatalog === undefined) delete process.env.FAKE_CLAUDE_CATALOG;
+      else process.env.FAKE_CLAUDE_CATALOG = oldCatalog;
+      await p?.context().close();
+      server.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

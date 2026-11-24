@@ -118,7 +118,7 @@ export async function findStories(cwd: string): Promise<StoryEntry[]> {
 
 const COMPONENTS_FILE = join('.designer', 'components.json');
 
-async function componentPath(root: string, path: string) {
+export async function componentPath(root: string, path: string) {
   const target = path && !isAbsolute(path) ? await realpath(join(root, path)).catch(() => '') : '';
   const file = target ? relative(root, target) : '';
   if (!file || file === '..' || file.startsWith('..' + sep) || isAbsolute(file) || file.split(sep).includes('.git')) return '';

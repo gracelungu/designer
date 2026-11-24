@@ -14,6 +14,8 @@ export interface CliOptions {
   effort?: string;
   permissionMode?: string;
   resume?: string;
+  tools?: string[];
+  settingSources?: string;
   /** Added to Claude Code's own system prompt. */
   appendSystemPrompt?: string;
   /** Tools that never ask for permission (e.g. Designer's own MCP tools). */
@@ -27,7 +29,7 @@ export interface CliOptions {
 }
 
 /** Command-line arguments for a headless, stream-json Claude Code session. */
-export function buildArgs(o: Pick<CliOptions, 'model' | 'effort' | 'permissionMode' | 'resume' | 'appendSystemPrompt' | 'allowedTools'>): string[] {
+export function buildArgs(o: Pick<CliOptions, 'model' | 'effort' | 'permissionMode' | 'resume' | 'appendSystemPrompt' | 'allowedTools' | 'tools' | 'settingSources'>): string[] {
   const args = [
     '-p',
     '--input-format', 'stream-json',
@@ -36,8 +38,9 @@ export function buildArgs(o: Pick<CliOptions, 'model' | 'effort' | 'permissionMo
     '--include-partial-messages',
     '--replay-user-messages',
     '--permission-prompt-tool', 'stdio',
-    '--setting-sources', 'user,project,local',
+    '--setting-sources', o.settingSources ?? 'user,project,local',
   ];
+  if (o.tools) args.push('--tools', o.tools.join(','), '--strict-mcp-config');
   if (o.model) args.push('--model', o.model);
   if (o.effort) args.push('--effort', o.effort);
   if (o.permissionMode && o.permissionMode !== 'default') args.push('--permission-mode', o.permissionMode);

@@ -262,15 +262,6 @@ select.input { padding: 0 4px; }
 
 /* ---------- Components list ---------- */
 .comp-entry { padding: 0 6px; }
-.comp-head { display: flex; align-items: center; gap: 6px; width: 100%; border: 0; background: none; padding: 6px; border-radius: 6px; text-align: left; }
-.comp-head:hover { background: var(--bg-2); }
-.comp-head .chev { color: var(--faint); transition: transform 0.12s; }
-.comp-head .chev.open { transform: rotate(90deg); }
-.comp-name { font-weight: 600; }
-.comp-story { display: flex; justify-content: space-between; width: 100%; border: 0; background: none; padding: 5px 8px 5px 34px; border-radius: 6px; text-align: left; }
-.comp-story:hover:not(:disabled) { background: var(--bg-2); }
-.comp-story .faint { opacity: 0; }
-.comp-story:hover .faint { opacity: 1; }
 
 /* ---------- Existing panels: sessions, Claude Code, diffs, tokens ---------- */
 .row:hover { background: var(--bg-2); }
@@ -405,7 +396,6 @@ textarea.memory { width: 100%; min-height: 160px; border: 1px solid var(--line-2
 .setup-log li.running { color: var(--text); }
 .setup-log li.error { color: var(--del-text); }
 .comp-section { padding: 10px 12px 4px; font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
-.comp-props { padding: 0 8px 6px 34px; color: var(--faint); font-size: 11px; line-height: 1.45; }
 /* First-run onboarding */
 .onboarding { background: var(--bg-2); }
 .onboard-card { width: 520px; max-width: calc(100vw - 32px); padding: 24px; }
@@ -542,9 +532,6 @@ textarea.memory { width: 100%; min-height: 160px; border: 1px solid var(--line-2
 .component-controls .input { min-width: 0; flex: 1; }
 .components-panel .error-box { margin: 8px 12px; }
 
-.component-source-form { display: grid; gap: 8px; margin: 8px 12px; }
-.component-source-form label { display: grid; gap: 4px; }
-.component-source-form button { justify-self: start; }
 
 .chat-setup { padding: 12px; overflow: auto; }
 .chat-setup .card { width: auto; padding: 12px; overflow-wrap: anywhere; }
@@ -563,3 +550,18 @@ textarea.memory { width: 100%; min-height: 160px; border: 1px solid var(--line-2
 .proposal-image figcaption { margin-bottom: 4px; color: var(--muted); }
 .proposal-image img { width: 100%; max-height: 260px; object-fit: contain; border: 1px solid var(--line); border-radius: 6px; }
 .proposal-plan li, .proposal-output { white-space: pre-wrap; overflow-wrap: anywhere; }
+
+.catalog-group .comp-section { margin: 0; overflow-wrap: anywhere; }
+.catalog-row { display: flex; border-radius: 6px; min-height: 31px; }
+.catalog-row:hover, .catalog-row:focus-within { background: var(--bg-2); }
+.catalog-component, .catalog-info { border: 0; background: none; }
+.catalog-component { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; padding: 5px 8px; text-align: left; }
+.catalog-component span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.catalog-diamond { color: var(--accent); font-size: 15px; line-height: 1; }
+.catalog-info { padding: 0 8px; opacity: 0; }
+.catalog-row:hover .catalog-info, .catalog-row:focus-within .catalog-info, .catalog-info[aria-expanded="true"] { opacity: 0.75; }
+@media (hover: none) { .catalog-info { opacity: 0.75; } }
+.catalog-details { display: grid; gap: 5px; padding: 6px 12px 9px 24px; font-size: 11px; overflow-wrap: anywhere; }
+.catalog-details .btn { justify-self: start; }
+.picker-path { margin-top: 12px; }
+.picker-path .component-controls { padding-left: 0; padding-right: 0; }

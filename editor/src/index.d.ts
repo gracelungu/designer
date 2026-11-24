@@ -24,12 +24,13 @@ export type EditorNode = {
   sizing?: { h: string; v: string };
   clip?: boolean;
   text?: any;
-  code?: { kind: 'component' | 'page'; src: string | null; title: string; hug: boolean; args: Record<string, unknown>; storyId?: string; file?: string; url?: string; measured?: { w: number; h: number } };
+  code?: { kind: 'component' | 'page'; src: string | null; title: string; hug: boolean; args: Record<string, unknown>; storyId?: string; file?: string; source?: { file: string; exportName: string }; url?: string; measured?: { w: number; h: number } };
   codeLink?: { storyId?: string; file?: string; exportName?: string };
   [k: string]: any;
 };
 export interface CodeInfo {
   storyId?: string;
+  componentId?: string;
   title?: string;
   name?: string;
   argTypes?: Record<string, { name: string; type?: string; control?: string | null; options?: unknown[] | null; description?: string; defaultValue?: string; category?: string | null }>;

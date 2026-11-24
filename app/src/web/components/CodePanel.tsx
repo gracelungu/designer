@@ -66,7 +66,7 @@ function ComponentCode({ n, editor, onAsk }: { n: EditorNode; editor: Editor; on
         {code.storyId && <div className="faint mono">{code.storyId}</div>}
       </div>
       {info.error && <div className="error-box" style={{ margin: '0 12px 8px' }}>{info.error}</div>}
-      {!code.src && <div className="empty">This component isn't rendering yet. Start Storybook from the Components tab, or ask Claude.</div>}
+      {!code.src && <div className="empty">This component is waiting for its preview.</div>}
       <div className="section-title">
         Props
         {changed.length > 0 && (
@@ -76,7 +76,7 @@ function ComponentCode({ n, editor, onAsk }: { n: EditorNode; editor: Editor; on
         )}
       </div>
       {code.src && !info.argTypes && <div className="empty">Reading props from the component…</div>}
-      {info.argTypes && groups.length === 0 && <div className="empty">This story has no editable props.</div>}
+      {info.argTypes && groups.length === 0 && <div className="empty">This component has no editable props.</div>}
       {groups.map(([k, a]) => (
         <PropRow key={k} name={k} arg={a} value={args[k]} changed={code.args?.[k] !== undefined} onChange={(v) => setArg(k, v)} />
       ))}

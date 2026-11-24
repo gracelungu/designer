@@ -5,7 +5,6 @@ interface Listing {
   path: string;
   parent: string | null;
   dirs: string[];
-  isRepo: boolean;
   sep: string;
 }
 
@@ -15,7 +14,10 @@ export function ProjectPicker({ home, current, onOpen, onCancel, onDemo }: { hom
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [path, setPath] = useState('');
-  const go = (path: string) => api<Listing>(`/api/fs?path=${encodeURIComponent(path)}`).then(setDir, (e: Error) => setError(e.message));
+  const go = (path: string) => {
+    setError('');
+    return api<Listing>(`/api/fs?path=${encodeURIComponent(path)}`).then(setDir, (e: Error) => setError(e.message));
+  };
   useEffect(() => {
     void go(current ?? home);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -35,7 +37,7 @@ export function ProjectPicker({ home, current, onOpen, onCancel, onDemo }: { hom
     <div className="modal picker" data-canvas-keys="off">
       <div>
         <h3>Open a project</h3>
-        <p>Choose a local folder to browse its components and open its canvas.</p>
+        <p>Choose the folder that contains your project.</p>
         {(window.designerNative || onDemo) && (
           <div className="actions" style={{ marginBottom: 10, justifyContent: 'flex-start' }}>
             {window.designerNative && (
@@ -47,28 +49,31 @@ export function ProjectPicker({ home, current, onOpen, onCancel, onDemo }: { hom
             {onDemo && <button className="btn" disabled={busy} onClick={() => void open(onDemo)}>Open the demo project</button>}
           </div>
         )}
-        <form className="component-controls" onSubmit={(event) => {
-          event.preventDefault();
-          void open(() => onOpen(path.trim()));
-        }}>
-          <input className="input" placeholder="Paste a folder path" aria-label="Project folder path" value={path} onChange={(event) => setPath(event.target.value)} />
-          <button className="btn" disabled={busy || !path.trim()}>Open path</button>
-        </form>
         {dir && (
           <>
             <div className="mono" style={{ wordBreak: 'break-all' }}>{dir.path}</div>
             <div className="folder-list">
-              {dir.parent && <button onClick={() => go(dir.parent!)}>↑ ..</button>}
+              {dir.parent && <button disabled={busy} onClick={() => void go(dir.parent!)}>↑ ..</button>}
               {dir.dirs.map((d) => (
-                <button key={d} onClick={() => go(dir.path + dir.sep + d)}>📁 {d}</button>
+                <button key={d} disabled={busy} onClick={() => void go(dir.path + dir.sep + d)}>📁 {d}</button>
               ))}
             </div>
             <div className="actions">
-              <button className="btn primary" disabled={busy} onClick={() => void open(() => onOpen(dir.path))}>{busy ? 'Opening…' : dir.isRepo ? 'Open this repository' : 'Open this folder'}</button>
-              {onCancel && <button className="btn" onClick={onCancel}>Cancel</button>}
+              <button className="btn primary" disabled={busy} onClick={() => void open(() => onOpen(dir.path))}>{busy ? 'Scanning project files…' : 'Open this folder'}</button>
+              {onCancel && <button className="btn" disabled={busy} onClick={onCancel}>Cancel</button>}
             </div>
           </>
         )}
+        <details className="picker-path">
+          <summary>Enter a folder path</summary>
+          <form className="component-controls" onSubmit={(event) => {
+            event.preventDefault();
+            void open(() => onOpen(path.trim()));
+          }}>
+            <input className="input" placeholder="Paste a folder path" aria-label="Project folder path" value={path} onChange={(event) => setPath(event.target.value)} />
+            <button className="btn" disabled={busy || !path.trim()}>Open path</button>
+          </form>
+        </details>
         {error && <p className="error-box" style={{ marginTop: 10 }}>{error}</p>}
       </div>
     </div>

@@ -14,6 +14,9 @@ import { addSourceComponent, DevProcess, diffFor, findRunningStorybook, getLates
 import { PreviewProxies } from './proxy.js';
 import { describeSetup, ProjectRunner } from './runner.js';
 import { planProject } from './setup.js';
+import { ComponentCatalog } from './componentCatalog.js';
+import { ComponentPreviews } from './componentPreview.js';
+import { componentKey, type ProjectInfo } from '../shared/protocol.js';
 import { handleMcp, serveMcp, SYSTEM_PROMPT, type ToolHost } from './mcp.js';
 import { FigmaClient, figmaStatus, parseOutline } from './figma.js';
 import { demoAvailable, installDemo } from './demo.js';
@@ -69,6 +72,10 @@ export async function startServer(opts: ServerOptions = {}) {
   let capsCache: Capabilities | undefined;
   let canvasState: CanvasState | undefined;
   const workspace = opts.workspace ?? join(homedir(), 'Designer');
+  const catalog = new ComponentCatalog(workspace);
+  const componentPreviews = new ComponentPreviews();
+  let activeCatalog: ProjectInfo | undefined;
+  let projectGeneration = 0;
   const sockets = new Set<WebSocket>();
   const app = new DevProcess('dev');
   const storybook = new DevProcess('storybook');
@@ -178,25 +185,45 @@ export async function startServer(opts: ServerOptions = {}) {
     return comments;
   }
 
+  function scanCatalog(info: ProjectInfo) {
+    const generation = projectGeneration;
+    activeCatalog = info;
+    void catalog.scan(info, claude.found && claude.loggedIn !== false ? claude.path : undefined, session?.model, () => {
+      if (projectPath === info.path && generation === projectGeneration) {
+        broadcast({ type: 'component-catalog', project: catalog.merge(activeCatalog ?? info) });
+      }
+    });
+  }
+
   async function openProject(path: string, byClaude = false, autoRun = opts.autoSetup === true) {
+    if (!path.trim()) throw new HttpError(400, 'Choose a project folder.');
     const p = await realpath(resolve(path)).catch(() => resolve(path));
     if (!(await stat(p).then((s) => s.isDirectory(), () => false))) throw new HttpError(400, `${p} is not a folder`);
     const isNew = p !== projectPath;
     if (isNew) {
+      projectGeneration++;
+      activeCatalog = undefined;
       setup.cancel();
       app.stop();
       storybook.stop();
+      componentPreviews.reset();
       projectPath = p;
       void headWatcher.watch(p);
       if (session && session.cwd !== p && !byClaude) session.note(`The user opened the project at ${p}. Work in that folder from now on (use absolute paths, and cd there before running commands).`);
     }
-    const info = await projectInfo(p);
-    broadcast({ type: 'project', project: info });
-    if (isNew) broadcast({ type: 'setup', setup: null });
-    // Setup: Claude works out how it runs and starts it (or the saved recipe does), in the background.
+    const generation = projectGeneration;
+    const [info] = await Promise.all([projectInfo(p), isNew ? catalog.open(p) : undefined]);
+    if (generation !== projectGeneration) throw new HttpError(409, 'Another project has opened.');
+    activeCatalog = info;
+    broadcast({ type: 'project', project: catalog.merge(info) });
+    if (isNew) {
+      broadcast({ type: 'setup', setup: null });
+      scanCatalog(info);
+    }
+    // Explicit CLI setup and existing app preview integrations still use the app runner.
     if (autoRun && (isNew || setup.state?.status === 'failed')) void autoSetup(p);
     void addAzureServer();
-    return info;
+    return catalog.merge(info);
   }
 
   function autoSetup(p: string, fresh = false, localFirst = false) {
@@ -207,7 +234,7 @@ export async function startServer(opts: ServerOptions = {}) {
     if (![...sockets].some((s) => s.readyState === s.OPEN)) throw new Error('The Designer window is not open, so the canvas cannot be changed right now.');
     const requestId = randomBytes(8).toString('hex');
     return new Promise((done, fail) => {
-      const t = setTimeout(() => (waiting.delete(requestId), fail(new Error('The canvas did not answer in time.'))), 10000);
+      const t = setTimeout(() => (waiting.delete(requestId), fail(new Error('The canvas did not answer in time.'))), op.kind === 'show-source-component' ? 240000 : 10000);
       waiting.set(requestId, (r) => (clearTimeout(t), done(r)));
       broadcast({ type: 'canvas-op', requestId, op });
     });
@@ -253,11 +280,11 @@ export async function startServer(opts: ServerOptions = {}) {
     openProject: async (path) => {
       const info = await openProject(path, true);
       const scripts = Object.entries(info.scripts).map(([k, v]) => `  ${k}: ${v}`).join('\n') || '  (none)';
-      const comps = info.components.slice(0, 40).map((c) => `  ${c.name} (${c.file}${c.storyIds.length ? `, stories: ${c.storyIds.join(', ')}` : ', no story'})`).join('\n');
+      const comps = info.components.slice(0, 40).map((c) => `  ${c.name} (${c.file}${c.exportName ? `#${c.exportName}` : ''})`).join('\n');
       const s = setup.state;
       const how = s?.project === info.path
         ? s.status === 'running' ? 'A preview setup is running.' : describeSetup(s)
-        : 'The component inventory is ready. Start a preview only if the task needs one.';
+        : 'Source components can be placed directly with show_component.';
       return `Opened ${info.path}. ${how}\nComponents (${info.components.length}):\n${comps || '  (none found)'}\nGit: ${info.git.isRepo ? `${info.git.branch ?? ''}${info.git.remote ? ` (remote ${info.git.remote})` : ' (no remote)'}` : 'not a git repository'}\nScripts:\n${scripts}\nStorybook stories: ${info.stories.reduce((n, s) => n + s.stories.length, 0)} in ${info.stories.length} files.\nNote: your own working folder is still ${session?.cwd ?? home()}; use absolute paths or cd into the project.`;
     },
     runProject: async (command, kind) => {
@@ -284,6 +311,16 @@ export async function startServer(opts: ServerOptions = {}) {
       if (resolve !== undefined) c.resolved = resolve;
       await saveComments(list);
       return `${text.trim() ? 'Replied to' : 'Updated'} comment #${c.num}${resolve ? ' and resolved it' : resolve === false ? ' and reopened it' : ''}.`;
+    },
+    showSourceComponent: async (file, exportName, nextToSelection) => {
+      const project = requireProject();
+      const info = catalog.merge(activeCatalog ?? await projectInfo(project));
+      const matches = info.components.filter((component) => component.file === file && (exportName === undefined || component.exportName === exportName));
+      if (matches.length !== 1) throw new Error(matches.length ? 'Give the exact component export name.' : 'The component was not found in the project catalog.');
+      const [component] = matches;
+      const result = await askCanvas({ kind: 'show-source-component', project, component, nextToSelection }) as { id?: string; error?: string };
+      if (result.error) throw new Error(result.error);
+      return `Placed ${component.name} on the canvas. ${JSON.stringify(result)}`;
     },
     showComponent: async (storyId, args, nextToSelection) => {
       if (!storyId) throw new Error('Give a story id.');
@@ -350,11 +387,16 @@ export async function startServer(opts: ServerOptions = {}) {
     },
     'POST /api/claude/recheck': async () => {
       claude = await detectClaude();
+      if (activeCatalog && catalog.merge(activeCatalog).catalog?.state === 'local') scanCatalog(activeCatalog);
       return claude;
     },
     'GET /api/fs': async (_b, url) => listDir(resolve(url.searchParams.get('path') || homedir())),
     'POST /api/project': async (body) => openProject(String(body.path ?? ''), false, typeof body.setup === 'boolean' ? body.setup : undefined),
     'POST /api/project/close': async () => {
+      projectGeneration++;
+      catalog.close();
+      componentPreviews.reset();
+      activeCatalog = undefined;
       setup.cancel();
       broadcast({ type: 'setup', setup: null });
       app.stop();
@@ -364,7 +406,33 @@ export async function startServer(opts: ServerOptions = {}) {
       broadcast({ type: 'project', project: null });
       return { ok: true };
     },
-    'GET /api/project': async () => (projectPath ? projectInfo(projectPath) : null),
+    'GET /api/project': async () => {
+      if (!projectPath) return null;
+      const generation = projectGeneration;
+      const info = await projectInfo(projectPath);
+      if (generation === projectGeneration) activeCatalog = info;
+      return catalog.merge(info);
+    },
+    'POST /api/components/scan': async (body) => {
+      const project = requireProject();
+      if (body.project !== project) throw new HttpError(409, 'The open project changed.');
+      const generation = projectGeneration;
+      const info = await projectInfo(project);
+      if (generation !== projectGeneration) throw new HttpError(409, 'The open project changed.');
+      scanCatalog(info);
+      return catalog.merge(info);
+    },
+    'POST /api/components/preview': async (body) => {
+      const project = requireProject();
+      if (body.project !== project) throw new HttpError(409, 'The open project changed.');
+      const generation = projectGeneration;
+      const info = catalog.merge(activeCatalog ?? await projectInfo(project));
+      const key = componentKey({ file: String(body.file ?? ''), exportName: String(body.exportName ?? '') });
+      const component = info.components.find((entry) => componentKey(entry) === key);
+      if (!component) throw new HttpError(404, 'This component is no longer in the catalog. Rescan the project.');
+      if (generation !== projectGeneration) throw new HttpError(409, 'The open project changed.');
+      return { src: await componentPreviews.render(project, component, catalog.recipe(key), body.rebuild === true) };
+    },
     'GET /api/project/setup': async () => setup.state ?? null,
     'POST /api/project/setup': async (body) => {
       const p = requireProject();
@@ -374,12 +442,15 @@ export async function startServer(opts: ServerOptions = {}) {
       return setup.state ?? null;
     },
     'GET /api/project/plan': async () => planProject(requireProject()),
-    'GET /api/components': async () => (await projectInfo(requireProject())).components,
+    'GET /api/components': async () => catalog.merge(await projectInfo(requireProject())).components,
     'POST /api/components': async (body) => {
       const project = requireProject();
       if (body.project !== project) throw new HttpError(409, 'The open project changed. Open the component form again.');
       await addSourceComponent(project, { name: String(body.name ?? '').trim(), file: String(body.file ?? '').trim(), exportName: String(body.exportName ?? '').trim() });
-      return projectInfo(project);
+      const generation = projectGeneration;
+      const info = await projectInfo(project);
+      if (generation === projectGeneration) activeCatalog = info;
+      return catalog.merge(info);
     },
     'GET /api/capabilities': async () => capsCache ?? capabilities(),
     'POST /api/capabilities/refresh': async () => capabilities(),
@@ -482,8 +553,7 @@ export async function startServer(opts: ServerOptions = {}) {
         preview: !!body.preview,
       });
       if (r.ok && r.url && !r.needsConfirm) for (const id of r.reviewIds ?? chosen.map((v) => v.id)) await visualReviews.update(id, { sentIn: r.url }).catch(() => undefined);
-      broadcast({ type: 'project', project: await projectInfo(cwd) });
-      return r;
+      return afterGit(r, true);
     }),
     'GET /api/git/workspace': async () => workspaceTracking(requireProject()),
     'POST /api/git/workspace': async (body) => gitOperation(async () => {
@@ -542,7 +612,7 @@ export async function startServer(opts: ServerOptions = {}) {
       const old = data?.doc?.comments;
       if (!comments.length && Array.isArray(old) && old.length) comments = await writeComments(designerDir(), old);
       if (data?.doc) data.doc.comments = comments;
-      return { path: f, data, comments, author: await commentAuthor(projectPath) };
+      return { path: f, project: projectPath, data, comments, author: await commentAuthor(projectPath) };
     },
     'POST /api/canvas': async (body) => {
       const f = await canvasFile();
@@ -612,7 +682,14 @@ export async function startServer(opts: ServerOptions = {}) {
 
   /** After a version or variation change, the UI refreshes the project (and the canvas, which may differ). */
   async function afterGit<T extends { ok: boolean }>(r: T, contentChanged = false) {
-    if (projectPath && (r.ok || contentChanged)) broadcast({ type: 'project', project: await projectInfo(projectPath) });
+    if (projectPath && (r.ok || contentChanged)) {
+      const generation = projectGeneration;
+      const info = await projectInfo(projectPath);
+      if (generation === projectGeneration) {
+        activeCatalog = info;
+        broadcast({ type: 'project', project: catalog.merge(info) });
+      }
+    }
     return r;
   }
 
@@ -780,6 +857,8 @@ export async function startServer(opts: ServerOptions = {}) {
   if (opts.initialProject) await openProject(opts.initialProject).catch(() => undefined);
   const close = () => {
     setup.cancel();
+    catalog.close();
+    componentPreviews.close();
     session?.stop();
     headWatcher.stop();
     reviews?.provider?.close();

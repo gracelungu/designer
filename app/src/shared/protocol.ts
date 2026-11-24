@@ -97,6 +97,7 @@ export interface ProjectInfo {
   /** Reusable components found in the source, with their props, linked to their stories. */
   components: ComponentEntry[];
   componentNotes?: string[];
+  catalog?: ComponentCatalogStatus;
 }
 
 export type PackageManager = 'npm' | 'pnpm' | 'yarn' | 'bun';
@@ -119,6 +120,22 @@ export interface ComponentEntry {
   props: ComponentProp[];
   /** Storybook story ids that render it; empty when it has no story yet. */
   storyIds: string[];
+  /** A source-derived group, such as Forms or Primitives/Input. */
+  group?: string;
+}
+
+export interface ComponentCatalogStatus {
+  state: 'scanning' | 'ready' | 'local' | 'failed';
+  detail?: string;
+}
+
+export interface ComponentSource {
+  file: string;
+  exportName: string;
+}
+
+export function componentKey(source: ComponentSource) {
+  return JSON.stringify([source.file, source.exportName]);
 }
 
 /** How a project runs, worked out from its files. */
@@ -423,6 +440,7 @@ export interface SimpleNode {
 export type CanvasOp =
   | { kind: 'add-nodes'; nodes: SimpleNode[]; nextToSelection?: boolean; select?: boolean }
   | { kind: 'update-nodes'; updates: (Partial<SimpleNode> & { id: string })[] }
+  | { kind: 'show-source-component'; project: string; component: ComponentEntry; nextToSelection?: boolean }
   | { kind: 'show-component'; storyId: string; title: string; src: string; args?: Record<string, unknown>; nextToSelection?: boolean; file?: string }
   | { kind: 'show-page'; url: string; src: string; name: string; width: number; height: number }
   | { kind: 'select'; ids: string[] };
@@ -541,6 +559,7 @@ export type ServerMessage =
   | { type: 'rewound'; userMessageId: string; dryRun: boolean; result: { canRewind: boolean; error?: string; filesChanged?: string[]; insertions?: number; deletions?: number } }
   | { type: 'history'; items: ChatItem[] }
   | { type: 'project'; project: ProjectInfo | null }
+  | { type: 'component-catalog'; project: ProjectInfo }
   | { type: 'run'; kind: 'app' | 'storybook'; url: string }
   | { type: 'setup'; setup: SetupState | null }
   | { type: 'canvas-op'; requestId: string; op: CanvasOp }

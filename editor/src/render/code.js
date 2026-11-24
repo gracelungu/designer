@@ -46,7 +46,7 @@ export class CodeLayer {
     const n = this.store.get(id);
     const f = this.frames.get(id);
     const info = this.info.get(id);
-    if (!n || !f || !info || !info.storyId) return;
+    if (!n || !f || !info || !(info.storyId || info.componentId)) return;
     const want = JSON.stringify(n.code.args || {});
     if (!force && f.sentArgs === want) return;
     f.sentArgs = want;
@@ -85,8 +85,8 @@ export class CodeLayer {
         this.store.finalize();
         this.store.emit('doc');
       }
-    } else if (d.type === 'story') {
-      Object.assign(info, { storyId: d.storyId, title: d.title, name: d.name, argTypes: d.argTypes || {}, initialArgs: d.initialArgs || {}, args: d.args || {}, error: null });
+    } else if (d.type === 'story' || d.type === 'component') {
+      Object.assign(info, { storyId: d.storyId, componentId: d.componentId, title: d.title, name: d.name, argTypes: d.argTypes || {}, initialArgs: d.initialArgs || {}, args: d.args || {}, error: null });
       this.info.set(id, info);
       this.syncArgs(id, true);
     } else if (d.type === 'args') {
@@ -123,6 +123,10 @@ export class CodeLayer {
         iframe.setAttribute('title', n.name);
         iframe.setAttribute('allowtransparency', 'true');
         iframe.setAttribute('scrolling', 'no');
+        if (n.code.source) {
+          iframe.setAttribute('sandbox', 'allow-scripts');
+          iframe.referrerPolicy = 'no-referrer';
+        }
         wrap.append(iframe);
         f = { wrap, iframe, src: null };
         this.frames.set(id, f);
@@ -139,6 +143,7 @@ export class CodeLayer {
         f.src = src;
         f.sentArgs = null;
         f.sentSize = null;
+        this.info.delete(id);
         f.iframe.src = src;
       }
       this.noteResize(n);

@@ -48,6 +48,11 @@ createInterface({ input: process.stdin }).on('line', async (line) => {
     return;
   }
   if (m.type === 'user') {
+    if (args.includes('--tools')) {
+      const result = process.env.FAKE_CLAUDE_CATALOG ?? '{"components":[]}';
+      out({ type: 'result', subtype: 'success', is_error: false, result });
+      return;
+    }
     const full = typeof m.message.content === 'string' ? m.message.content : '';
     // Designer's own notes lead the message ("[Designer] ..."); the fake acts on what the user typed.
     const text = full.replace(/^(\[Designer\][^\n]*\n)+\n?/, '');
